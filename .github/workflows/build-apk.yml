@@ -28,22 +28,25 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Rebuild TriCoach 2.0 project
+      - name: Rebuild TriCoach 2.1 project
         run: |
           cat payload/v2.part* | base64 --decode > tricoach-v2.zip
           unzip -t tricoach-v2.zip
           rm -rf buildsrc
           mkdir buildsrc
           unzip -q tricoach-v2.zip -d buildsrc
+          cat payload/v21patch.part* | base64 --decode > v21-patch.zip
+          unzip -t v21-patch.zip
+          unzip -oq v21-patch.zip -d buildsrc/TriCoach_Android
           test -f buildsrc/TriCoach_Android/settings.gradle
       - name: Build debug APK
         working-directory: buildsrc/TriCoach_Android
         run: gradle --no-daemon :app:assembleDebug --stacktrace
       - name: Rename APK
-        run: cp buildsrc/TriCoach_Android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v2.0-debug.apk
+        run: cp buildsrc/TriCoach_Android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v2.1-debug.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-2.0-Android-APK
-          path: TriCoach-v2.0-debug.apk
+          name: TriCoach-2.1-Android-APK
+          path: TriCoach-v2.1-debug.apk
           if-no-files-found: error
