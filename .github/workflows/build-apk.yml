@@ -30,29 +30,24 @@ jobs:
           gradle-version: '8.13'
       - name: Rebuild TriCoach 2.1 project
         run: |
-          set -x
           cat payload/v2.part* | base64 --decode > tricoach-v2.zip
-          echo "BASE_V2_SIZE=$(stat -c %s tricoach-v2.zip)"
           unzip -t tricoach-v2.zip
           rm -rf buildsrc
           mkdir buildsrc
           unzip -q tricoach-v2.zip -d buildsrc
-
-          cat payload/v21patch.part00 payload/v21patch.part01 payload/v21patch.part02 payload/v21patch.part03 payload/v21patch.part04 payload/v21patch.part05 payload/v21patch.part06 payload/v21fix.part00 payload/v21fix.part01 payload/v21fix.part02 payload/v21fix.part03 payload/v21fix.part04 payload/v21fix.part05 > v21-current.b64
-          echo "V21_B64_SIZE=$(stat -c %s v21-current.b64) expected=67676"
-          base64 --decode v21-current.b64 > v21-patch.zip || echo "V21_BASE64_DECODE_FAILED=$?"
-          echo "V21_ZIP_SIZE=$(stat -c %s v21-patch.zip) expected=50756"
-          sha256sum v21-patch.zip || true
-          unzip -t v21-patch.zip || echo "V21_ZIP_TEST_FAILED=$?"
-          unzip -oq v21-patch.zip -d buildsrc/TriCoach_Android || true
-
-          cat payload/main2.part00 payload/main2.part01 > main-current.b64
-          echo "MAIN_B64_SIZE=$(stat -c %s main-current.b64)"
-          base64 --decode main-current.b64 > main-current.gz || echo "MAIN_BASE64_DECODE_FAILED=$?"
-          echo "MAIN_GZ_SIZE=$(stat -c %s main-current.gz)"
-          gzip -t main-current.gz || echo "MAIN_GZIP_TEST_FAILED=$?"
-          gunzip -c main-current.gz > buildsrc/TriCoach_Android/app/src/main/java/pl/tricoach/mobile/MainActivity.java || echo "MAIN_GUNZIP_FAILED=$?"
-          echo "MAIN_JAVA_SIZE=$(stat -c %s buildsrc/TriCoach_Android/app/src/main/java/pl/tricoach/mobile/MainActivity.java)"
+          cat payload/v21p00.part00 payload/v21p00.part01 payload/v21p00.part02 payload/v21p00.part03 payload/v21patch.part01 payload/v21patch.part02 payload/v21patch.part03 payload/v21patch.part04 payload/v21patch.part05 payload/v21patch.part06 payload/v21fix.part00 payload/v21fix.part01 payload/v21fix.part02 payload/v21fix.part03 payload/v21fix.part04 payload/v21fix.part05 | base64 --decode > v21-patch.zip
+          test "$(stat -c %s v21-patch.zip)" = "50756"
+          unzip -t v21-patch.zip
+          unzip -oq v21-patch.zip -d buildsrc/TriCoach_Android
           test -f buildsrc/TriCoach_Android/settings.gradle
-          test -s buildsrc/TriCoach_Android/app/src/main/java/pl/tricoach/mobile/MainActivity.java
-          exit 1
+      - name: Build debug APK
+        working-directory: buildsrc/TriCoach_Android
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Rename APK
+        run: cp buildsrc/TriCoach_Android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v2.1-debug.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TriCoach-2.1-Android-APK
+          path: TriCoach-v2.1-debug.apk
+          if-no-files-found: error
