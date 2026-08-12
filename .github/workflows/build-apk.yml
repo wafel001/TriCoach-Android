@@ -35,7 +35,7 @@ jobs:
           rm -rf buildsrc
           mkdir buildsrc
           unzip -q tricoach-v2.zip -d buildsrc
-          cat payload/v21patch.part* | base64 --decode > v21-patch.zip
+          cat payload/v21patch.part00 payload/v21patch.part01 payload/v21patch.part02 payload/v21patch.part03 payload/v21patch.part04 payload/v21patch.part05 payload/v21patch.part06 payload/v21fix.part00 payload/v21fix.part01 payload/v21fix.part02 payload/v21fix.part03 payload/v21fix.part04 payload/v21fix.part05 | base64 --decode > v21-patch.zip
           unzip -t v21-patch.zip
           unzip -oq v21-patch.zip -d buildsrc/TriCoach_Android
           test -f buildsrc/TriCoach_Android/settings.gradle
