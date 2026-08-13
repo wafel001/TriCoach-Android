@@ -1,0 +1,1 @@
+TriCoach 2.1: fixing Android system-bar overlap, adding PL/EN/ES/CS/RU/ZH language selector, adding new branding assets, and preparing Play Store release build.
