@@ -1,8 +1,8 @@
-name: Build TriCoach v2.2 APK
+name: Build TriCoach v3 APK
 
 on:
   push:
-    branches: [ v22-build ]
+    branches: [ v30-build ]
   workflow_dispatch:
 
 permissions:
@@ -15,40 +15,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
       - name: Install Android API 36
         run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
-
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-
-      - name: Build installable APK
-        working-directory: v22
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
-
-      - name: Collect APK
-        run: cp v22/app/build/outputs/apk/debug/app-debug.apk TriCoach-v2.2-test.apk
-
-      - name: Verify APK exists
-        run: |
-          test -s TriCoach-v2.2-test.apk
-          unzip -t TriCoach-v2.2-test.apk >/dev/null
-          ls -lh TriCoach-v2.2-test.apk
-
+      - name: Build v3
+        run: bash v30/build-source.sh
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-v2.2-Android-APK
-          path: TriCoach-v2.2-test.apk
+          name: TriCoach-v3-Android-APK
+          path: TriCoach-v3.0-test.apk
           if-no-files-found: error
