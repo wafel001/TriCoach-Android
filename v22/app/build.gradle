@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'pl.tricoach.mobile'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'pl.tricoach.mobile'
+        minSdk 26
+        targetSdk 36
+        versionCode 22
+        versionName '2.2.0'
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.v22'
+            versionNameSuffix '-test'
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
