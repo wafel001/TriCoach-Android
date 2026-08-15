@@ -6,6 +6,7 @@ PKG="com.pixelempire.clicker"
 ACT="$PKG/.MainActivity"
 LOG="pixel-empire-logcat.txt"
 SHOT="pixel-empire-v2-home.png"
+FINAL_SHOT="pixel-empire-v2-infinity.png"
 
 adb logcat -c
 adb install -r "$APK"
@@ -40,14 +41,24 @@ adb shell input keyevent KEYCODE_HOME
 sleep 1
 adb shell am start -W -n "$ACT"
 sleep 2
-
 PID="$(adb shell pidof "$PKG" | tr -d '\r' || true)"
 if [[ -z "$PID" ]]; then
   echo "Pixel Empire process is not alive after interaction test"
   adb logcat -d -v brief > "$LOG"
-  grep -A 80 -B 20 -E "FATAL EXCEPTION|AndroidRuntime|Process: $PKG|$PKG" "$LOG" || true
   exit 1
 fi
+
+# Debug-build-only visual QA of the final Infinity Spire era.
+adb shell am force-stop "$PKG" || true
+adb shell am start -W -n "$ACT" --ei demo_stage 23
+sleep 2
+adb shell input tap 180 720
+adb shell input tap 540 980
+adb shell input tap 900 1320
+sleep 0.4
+adb exec-out screencap -p > "$FINAL_SHOT"
+PID="$(adb shell pidof "$PKG" | tr -d '\r' || true)"
+[[ -n "$PID" ]]
 
 adb logcat -d -v brief > "$LOG"
 if grep -qE "FATAL EXCEPTION|Process: $PKG" "$LOG"; then
@@ -56,4 +67,4 @@ if grep -qE "FATAL EXCEPTION|Process: $PKG" "$LOG"; then
   exit 1
 fi
 
-echo "Pixel Empire interactive smoke test passed; PID=$PID"
+echo "Pixel Empire interactive + visual QA smoke test passed; PID=$PID"
