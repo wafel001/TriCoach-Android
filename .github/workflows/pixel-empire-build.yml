@@ -76,6 +76,7 @@ jobs:
             pixel-empire-logcat.txt
             pixel-empire-api28-logcat.txt
             pixel-empire-v2-home.png
+            pixel-empire-v2-infinity.png
           if-no-files-found: ignore
           retention-days: 7
 
