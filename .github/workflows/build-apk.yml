@@ -1,4 +1,4 @@
-name: Build TriCoach 4.0.1 APK
+name: Build TriCoach 5.0 APK
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,58 +25,70 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK
-        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+      - name: Install Android API 36
+        run: yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" || true
 
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Rebuild TriCoach 4.0 base
+      - name: Rebuild verified TriCoach 5.0 source
         run: |
-          cat payload/v40build40.part* | base64 --decode > tricoach-v4-build40.zip
-          echo "6e2afc70609eefbf8d5ccdb755bab26770bb9d6abc99b39dfffdd749f92fea83  tricoach-v4-build40.zip" | sha256sum -c -
+          cat payload/v50build50.part* | base64 --decode > TriCoach-v5.0-build50-AndroidStudio.zip
+          echo "b61830d07d19de29d41298b1b4ff0db54d6d19831aacb32b69cde1d1a59ccdc5  TriCoach-v5.0-build50-AndroidStudio.zip" | sha256sum -c -
+          unzip -t TriCoach-v5.0-build50-AndroidStudio.zip
           rm -rf buildsrc
           mkdir buildsrc
-          unzip -q tricoach-v4-build40.zip -d buildsrc
+          unzip -q TriCoach-v5.0-build50-AndroidStudio.zip -d buildsrc
 
-      - name: Patch to TriCoach 4.0.1 build 41
-        run: |
-          cat payload/tc401.patch.gz.b64.part0 payload/tc401.patch.gz.b64.part1 | base64 --decode | gzip -dc > /tmp/tc401.patch
-          cd buildsrc
-          patch -p3 < /tmp/tc401.patch
-
-      - name: Validate web app and version
+      - name: Validate web app, Android config and security
         run: |
           python3 - <<'PY'
           import re, pathlib
           p=pathlib.Path('buildsrc/tricoach_android/app/src/main/assets/index.html')
-          s=p.read_text()
-          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
-          pathlib.Path('/tmp/tricoach401.js').write_text('\n'.join(scripts))
-          ids=set(re.findall(r'id=["\']([^"\']+)["\']',s))
-          refs=set(re.findall(r'\$\(["\']([^"\']+)["\']\)',s))
-          missing=sorted(refs-ids)
-          print('missing ids',missing)
+          s=p.read_text(encoding='utf-8')
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>', s, re.S)
+          pathlib.Path('/tmp/tricoach50.js').write_text('\n'.join(scripts), encoding='utf-8')
+          ids=re.findall(r'id=["\']([^"\']+)["\']', s)
+          dup=sorted({x for x in ids if ids.count(x)>1})
+          print('duplicate ids:', dup)
+          if dup: raise SystemExit(1)
+          onclick=set(re.findall(r'onclick=["\']\s*([A-Za-z_$][\w$]*)\s*\(', s))
+          js='\n'.join(scripts)
+          defs=set(re.findall(r'(?:function\s+|(?:const|let|var)\s+)([A-Za-z_$][\w$]*)', js))
+          missing=sorted(onclick-defs)
+          print('missing onclick handlers:', missing)
           if missing: raise SystemExit(1)
+          for needle in ['tricoach-polar-oauth.vercel.app','secureGet','secureSet','secureDelete']:
+            if needle not in s: raise SystemExit(f'missing {needle}')
           PY
-          node --check /tmp/tricoach401.js
-          grep -q "versionCode 41" buildsrc/tricoach_android/app/build.gradle
-          grep -q "versionName '4.0.1'" buildsrc/tricoach_android/app/build.gradle
-          grep -q "tricoach-polar-oauth.vercel.app" buildsrc/tricoach_android/app/src/main/assets/index.html
+          node --check /tmp/tricoach50.js
+          grep -q "compileSdk 36" buildsrc/tricoach_android/app/build.gradle
+          grep -q "targetSdk 36" buildsrc/tricoach_android/app/build.gradle
+          grep -q "versionCode 50" buildsrc/tricoach_android/app/build.gradle
+          grep -q "versionName '5.0'" buildsrc/tricoach_android/app/build.gradle
+          grep -q 'android:usesCleartextTraffic="false"' buildsrc/tricoach_android/app/src/main/AndroidManifest.xml
           grep -q 'android:scheme="tricoach"' buildsrc/tricoach_android/app/src/main/AndroidManifest.xml
+          grep -q 'AndroidKeyStore' buildsrc/tricoach_android/app/src/main/java/com/tricoach/app/MainActivity.java
 
       - name: Build install APK
         working-directory: buildsrc/tricoach_android
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
       - name: Collect APK
-        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v4.0.1-build41.apk
+        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v5.0-build50.apk
+
+      - name: Verify APK structure
+        run: |
+          unzip -t TriCoach-v5.0-build50.apk
+          unzip -l TriCoach-v5.0-build50.apk | grep -q 'classes.dex'
+          unzip -l TriCoach-v5.0-build50.apk | grep -q 'assets/index.html'
+          sha256sum TriCoach-v5.0-build50.apk
 
       - name: Upload install APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-v4.0.1-build41-APK
-          path: TriCoach-v4.0.1-build41.apk
+          name: TriCoach-v5.0-build50-APK
+          path: TriCoach-v5.0-build50.apk
           if-no-files-found: error
