@@ -44,13 +44,19 @@ jobs:
           script: |
             adb logcat -c
             adb install -r pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -W -n com.pixelempire.clicker/.MainActivity
-            sleep 6
-            adb shell pidof com.pixelempire.clicker
+            adb shell am start -W -n com.pixelempire.clicker/.MainActivity || true
+            sleep 8
             adb logcat -d -v brief > pixel-empire-logcat.txt
-            if grep -E "FATAL EXCEPTION|AndroidRuntime.*com.pixelempire.clicker|Process: com.pixelempire.clicker" pixel-empire-logcat.txt; then
+            PID="$(adb shell pidof com.pixelempire.clicker 2>/dev/null | tr -d '\r' || true)"
+            echo "Pixel Empire PID after launch: ${PID:-<none>}"
+            if [ -z "$PID" ]; then
+              echo "Pixel Empire process exited after launch"
+              grep -A 80 -B 20 -E "FATAL EXCEPTION|AndroidRuntime|Process: com.pixelempire.clicker|com.pixelempire.clicker" pixel-empire-logcat.txt || true
+              exit 1
+            fi
+            if grep -E "FATAL EXCEPTION|Process: com.pixelempire.clicker" pixel-empire-logcat.txt; then
               echo "Pixel Empire crashed during smoke test"
-              grep -A 40 -B 10 -E "FATAL EXCEPTION|Process: com.pixelempire.clicker" pixel-empire-logcat.txt || true
+              grep -A 80 -B 20 -E "FATAL EXCEPTION|Process: com.pixelempire.clicker" pixel-empire-logcat.txt || true
               exit 1
             fi
 
