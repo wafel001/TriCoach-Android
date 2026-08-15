@@ -1,10 +1,12 @@
 package com.pixelempire.clicker;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -23,706 +25,201 @@ import java.util.Locale;
 import java.util.Random;
 
 public final class GameView extends View implements Runnable {
-    private static final float DESIGN_W = 540f;
-    private static final long FRAME_MS = 50L;
-
+    private static final float DESIGN_W=540f;
     private final GameState state;
-    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Random random = new Random();
-    private final List<HitTarget> hits = new ArrayList<>();
-    private final List<FloatText> floatTexts = new ArrayList<>();
+    private final Paint p=new Paint();
+    private final Paint tp=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Random random=new Random();
+    private final List<Hit> hits=new ArrayList<>();
+    private final List<Particle> particles=new ArrayList<>();
+    private final List<Floating> floats=new ArrayList<>();
     private final Vibrator vibrator;
     private ToneGenerator tone;
 
-    private float scale = 1f;
-    private float logicalH = 960f;
-    private int tab = 0;
-    private int achievementPage = 0;
-    private long lastFrameNanos = 0;
-    private double secondAccumulator = 0;
-    private long lastAutosave = 0;
-    private long lastTapAt = 0;
-    private int combo = 0;
-    private float downX, downY;
-    private boolean moved = false;
-    private boolean running = false;
-
+    private float scale=1f,logicalH=960f;
+    private boolean running=false;
+    private long lastNanos=0,lastAutosave=0,lastTapAt=0;
+    private double secAcc=0;
+    private int tab=0,upgradePage=0,researchPage=0,missionPage=0,goalMode=0,tutorialStep=0,combo=0;
+    private float downX,downY;private boolean moved=false;
     private boolean offlinePopup;
-    private int tutorialStep = 0;
-    private String toastText = "";
-    private long toastUntil = 0;
-    private long resetArmedUntil = 0;
-    private int prestigeConfirmStage = 0;
-    private long prestigeConfirmUntil = 0;
+    private String toast="";private long toastUntil=0;
+    private long resetArmedUntil=0,ascendArmedUntil=0;
+    private int lastSeenLevel,lastSeenStage;
 
-    private static final int BG = Color.rgb(7, 11, 22);
-    private static final int PANEL = Color.rgb(20, 29, 49);
-    private static final int PANEL_2 = Color.rgb(29, 41, 66);
-    private static final int STROKE = Color.rgb(57, 72, 99);
-    private static final int GOLD = Color.rgb(251, 191, 36);
-    private static final int GOLD_DARK = Color.rgb(217, 119, 6);
-    private static final int TEXT = Color.rgb(241, 245, 249);
-    private static final int MUTED = Color.rgb(148, 163, 184);
-    private static final int GREEN = Color.rgb(52, 211, 153);
-    private static final int RED = Color.rgb(248, 113, 113);
-    private static final int PURPLE = Color.rgb(192, 132, 252);
-    private static final int CYAN = Color.rgb(34, 211, 238);
+    private static final int BG=Color.rgb(6,10,20),PANEL=Color.rgb(15,23,42),PANEL2=Color.rgb(24,35,58),STROKE=Color.rgb(56,72,100);
+    private static final int TEXT=Color.rgb(244,247,252),MUTED=Color.rgb(148,163,184),GOLD=Color.rgb(251,191,36),GREEN=Color.rgb(52,211,153);
+    private static final int CYAN=Color.rgb(34,211,238),PURPLE=Color.rgb(196,132,252),RED=Color.rgb(248,113,113),BLUE=Color.rgb(96,165,250);
 
-    private static final class HitTarget {
-        final RectF rect;
-        final String type;
-        final String id;
-        HitTarget(RectF rect, String type, String id) {
-            this.rect = rect;
-            this.type = type;
-            this.id = id;
-        }
+    private static final class Hit{final RectF r;final String type,id;Hit(RectF r,String type,String id){this.r=r;this.type=type;this.id=id;}}
+    private static final class Particle{float x,y,vx,vy,life,size;int color;Particle(float x,float y,float vx,float vy,float life,float size,int color){this.x=x;this.y=y;this.vx=vx;this.vy=vy;this.life=life;this.size=size;this.color=color;}}
+    private static final class Floating{float x,y,life;final String text;final int color;Floating(float x,float y,String text,int color){this.x=x;this.y=y;this.text=text;this.color=color;this.life=1f;}}
+
+    public GameView(Context context,GameState state){
+        super(context);this.state=state;setFocusable(true);setBackgroundColor(BG);
+        p.setAntiAlias(false);tp.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));
+        vibrator=(Vibrator)context.getSystemService(Context.VIBRATOR_SERVICE);
+        try{tone=new ToneGenerator(AudioManager.STREAM_MUSIC,30);}catch(Throwable ignored){}
+        offlinePopup=state.startupOfflineGain>0.01;lastSeenLevel=state.level;lastSeenStage=state.stage;
+        if(state.nextEventAt<=0)state.nextEventAt=System.currentTimeMillis()+45_000;
     }
 
-    private static final class FloatText {
-        float x, y, life;
-        final String text;
-        final int color;
-        FloatText(float x, float y, String text, int color) {
-            this.x = x; this.y = y; this.text = text; this.color = color; this.life = 1.0f;
-        }
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();running=true;lastNanos=System.nanoTime();post(this);}
+    @Override protected void onDetachedFromWindow(){running=false;removeCallbacks(this);if(tone!=null){try{tone.release();}catch(Throwable ignored){}tone=null;}super.onDetachedFromWindow();}
+
+    @Override public void run(){
+        if(!running)return;long n=System.nanoTime();double dt=Math.min(.25,Math.max(0,(n-lastNanos)/1e9));lastNanos=n;
+        state.tick(dt);secAcc+=dt;if(secAcc>=1){long s=(long)secAcc;state.playSeconds+=s;secAcc-=s;state.checkAchievements();}
+        updateEvents();updateFx((float)dt);consumeAchievementToast();detectProgress();
+        long now=System.currentTimeMillis();if(lastAutosave==0||now-lastAutosave>=5000){state.save(getContext());lastAutosave=now;}
+        invalidate();postDelayed(this,state.lowPower?100:33);
     }
 
-    public GameView(Context context, GameState state) {
-        super(context);
-        this.state = state;
-        setFocusable(true);
-        p.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-        vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
-        try { tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 35); } catch (Throwable ignored) {}
-        offlinePopup = state.startupOfflineGain > 0.01;
-        if (state.nextEventAt <= 0) state.nextEventAt = System.currentTimeMillis() + 60000;
-        setBackgroundColor(BG);
+    private void detectProgress(){
+        if(state.stage>lastSeenStage){lastSeenStage=state.stage;lastSeenLevel=state.level;showToast(L10n.t(state.language,"new_stage")+"  "+L10n.stageName(state.language,state.stage),2600);burst(270,330,CYAN,34);playFeedback(true);}
+        else if(state.level>lastSeenLevel){lastSeenLevel=state.level;showToast(L10n.t(state.language,"new_level")+"  "+state.level,1200);burst(270,420,GOLD,18);}
     }
 
-    @Override protected void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        running = true;
-        lastFrameNanos = System.nanoTime();
-        post(this);
+    private void updateEvents(){long now=System.currentTimeMillis();if(state.activeEventType>=0&&now>=state.activeEventUntil){state.activeEventType=-1;state.activeEventUntil=0;state.nextEventAt=now+45_000+random.nextInt(65_000);}else if(state.activeEventType<0&&now>=state.nextEventAt){state.activeEventType=random.nextInt(5);state.activeEventUntil=now+18_000;}}
+    private void updateFx(float dt){for(int i=particles.size()-1;i>=0;i--){Particle q=particles.get(i);q.life-=dt;q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=85*dt;if(q.life<=0)particles.remove(i);}for(int i=floats.size()-1;i>=0;i--){Floating f=floats.get(i);f.life-=dt*.75f;f.y-=42*dt;if(f.life<=0)floats.remove(i);}}
+    private void consumeAchievementToast(){if(!state.justUnlocked.isEmpty()&&System.currentTimeMillis()>toastUntil){GameState.Achievement a=state.justUnlocked.remove(0);showToast(L10n.t(state.language,"achievement")+"  +"+a.reward+" ◆",1800);}}
+    private void showToast(String s,long ms){toast=s;toastUntil=System.currentTimeMillis()+ms;}
+
+    @Override protected void onDraw(Canvas c){
+        super.onDraw(c);scale=getWidth()/DESIGN_W;if(scale<=0)scale=1;logicalH=getHeight()/scale;c.save();c.scale(scale,scale);hits.clear();
+        p.setShader(null);p.setStyle(Paint.Style.FILL);p.setColor(BG);c.drawRect(0,0,DESIGN_W,logicalH,p);
+        float top=82,bottom=logicalH-70;
+        if(tab==0)drawWorld(c,top,bottom);else{drawBackdrop(c);if(tab==1)drawUpgrades(c,top,bottom);else if(tab==2)drawGoals(c,top,bottom);else if(tab==3)drawResearch(c,top,bottom);else drawMenu(c,top,bottom);}
+        drawTop(c);drawEvent(c);drawNav(c);drawFx(c);drawToast(c);if(offlinePopup)drawOffline(c);if(!state.tutorialSeen)drawTutorial(c);c.restore();
     }
 
-    @Override protected void onDetachedFromWindow() {
-        running = false;
-        removeCallbacks(this);
-        if (tone != null) {
-            try { tone.release(); } catch (Throwable ignored) {}
-            tone = null;
-        }
-        super.onDetachedFromWindow();
+    private void drawBackdrop(Canvas c){p.setShader(new LinearGradient(0,0,0,logicalH,Color.rgb(6,11,23),Color.rgb(10,20,36),Shader.TileMode.CLAMP));c.drawRect(0,0,DESIGN_W,logicalH,p);p.setShader(null);for(int i=0;i<16;i++){p.setColor(Color.argb(40,80,120,180));float x=(i*73)%540,y=100+(i*97)%700;c.drawRect(x,y,x+2,y+2,p);}}
+
+    private void drawTop(Canvas c){
+        p.setColor(Color.argb(235,8,14,26));c.drawRect(0,0,DESIGN_W,82,p);p.setColor(Color.rgb(36,50,73));c.drawRect(0,80,DESIGN_W,82,p);
+        coin(c,24,28,12);text(c,state.format(state.coins),45,33,20,TEXT,Paint.Align.LEFT);text(c,state.format(state.getCps())+" "+L10n.t(state.language,"per_sec"),46,56,10,MUTED,Paint.Align.LEFT);
+        diamond(c,365,27,9,PURPLE);text(c,Integer.toString(state.crystals),382,33,14,TEXT,Paint.Align.LEFT);
+        diamond(c,438,27,9,CYAN);text(c,Integer.toString(state.researchPoints),455,33,14,TEXT,Paint.Align.LEFT);
+        text(c,"★ "+state.legacyStars,505,33,14,GOLD,Paint.Align.RIGHT);
+        text(c,L10n.t(state.language,"level")+" "+state.level,505,58,9,MUTED,Paint.Align.RIGHT);
     }
 
-    @Override public void run() {
-        if (!running) return;
-        long nowNanos = System.nanoTime();
-        double dt = Math.min(0.25, Math.max(0, (nowNanos - lastFrameNanos) / 1_000_000_000.0));
-        lastFrameNanos = nowNanos;
-        state.tick(dt);
-        secondAccumulator += dt;
-        if (secondAccumulator >= 1.0) {
-            long whole = (long) secondAccumulator;
-            state.playSeconds += whole;
-            secondAccumulator -= whole;
-            state.checkAchievements();
-        }
-        updateEvents();
-        updateFloats((float) dt);
-        consumeAchievementToast();
-        long now = System.currentTimeMillis();
-        if (lastAutosave == 0 || now - lastAutosave >= 5000) {
-            state.save(getContext());
-            lastAutosave = now;
-        }
-        invalidate();
-        postDelayed(this, FRAME_MS);
+    private void drawWorld(Canvas c,float top,float bottom){
+        RectF world=new RectF(0,top,DESIGN_W,bottom);hits.add(new Hit(world,"tap",""));
+        boolean night=LocalTime.now().getHour()<6||LocalTime.now().getHour()>=20;
+        int s=state.stage;int skyA,skyB;
+        if(s>=20){skyA=Color.rgb(8,8,32);skyB=Color.rgb(40,18,75);night=true;}else if(s>=15){skyA=night?Color.rgb(8,15,38):Color.rgb(45,92,148);skyB=night?Color.rgb(30,20,70):Color.rgb(178,105,180);}else{skyA=night?Color.rgb(8,18,44):Color.rgb(61,135,203);skyB=night?Color.rgb(25,43,83):Color.rgb(164,221,240);}
+        p.setShader(new LinearGradient(0,top,0,bottom,skyA,skyB,Shader.TileMode.CLAMP));c.drawRect(world,p);p.setShader(null);
+        drawSkyObjects(c,top,bottom,night,s);drawParallax(c,top,bottom,s);float ground=bottom-125;drawGround(c,ground,bottom,s);drawAmbient(c,ground,s);drawStructure(c,270,ground,s,state.levelProgress());
+        drawWorldHud(c,top,bottom);
     }
 
-    private void updateEvents() {
-        long now = System.currentTimeMillis();
-        if (state.activeEventType >= 0 && now >= state.activeEventUntil) {
-            state.activeEventType = -1;
-            state.activeEventUntil = 0;
-            state.nextEventAt = now + 45000 + random.nextInt(55000);
-        } else if (state.activeEventType < 0 && now >= state.nextEventAt) {
-            state.activeEventType = random.nextInt(3);
-            state.activeEventUntil = now + 15000;
-        }
+    private void drawSkyObjects(Canvas c,float top,float bottom,boolean night,int s){
+        if(night){for(int i=0;i<34;i++){float x=(i*83+17)%530,y=top+18+(i*47)%230;pixel(c,x,y,(i%4==0?4:2),Color.rgb(225,235,255));}p.setColor(Color.rgb(240,238,199));c.drawRect(452,top+38,478,top+64,p);p.setColor(Color.rgb(30,35,70));c.drawRect(462,top+34,482,top+56,p);}else{p.setColor(Color.rgb(255,223,92));c.drawRect(454,top+34,482,top+62,p);c.drawRect(461,top+27,475,top+69,p);}
+        float t=(System.currentTimeMillis()%20000)/20000f;cloud(c,55+t*55,top+70,1f);cloud(c,345-t*45,top+120,.75f);
+        if(s>=18){p.setColor(Color.argb(190,180,220,255));c.drawRect(55,top+62,122,top+66,p);c.drawRect(68,top+57,110,top+70,p);}
     }
 
-    private void updateFloats(float dt) {
-        for (int i = floatTexts.size() - 1; i >= 0; i--) {
-            FloatText f = floatTexts.get(i);
-            f.y -= 45f * dt;
-            f.life -= dt * 0.9f;
-            if (f.life <= 0) floatTexts.remove(i);
-        }
+    private void drawParallax(Canvas c,float top,float bottom,int s){float base=bottom-118;p.setColor(s>=15?Color.rgb(34,45,76):Color.rgb(71,102,118));Path path=new Path();path.moveTo(0,base);for(int x=0;x<=540;x+=60){float y=base-75-(float)(28*Math.sin((x+s*13)*.028));path.lineTo(x,y);}path.lineTo(540,base);path.close();c.drawPath(path,p);p.setColor(s>=15?Color.rgb(24,34,60):Color.rgb(48,78,78));Path path2=new Path();path2.moveTo(0,base+22);for(int x=0;x<=540;x+=45){float y=base-32-(float)(20*Math.sin((x+80)*.037));path2.lineTo(x,y);}path2.lineTo(540,base+22);path2.close();c.drawPath(path2,p);}
+
+    private void drawGround(Canvas c,float ground,float bottom,int s){if(s<12){p.setColor(Color.rgb(50,93,62));c.drawRect(0,ground,540,bottom,p);p.setColor(Color.rgb(84,123,71));c.drawRect(0,ground,540,ground+12,p);p.setColor(Color.rgb(58,47,38));c.drawRect(0,bottom-24,540,bottom,p);}else if(s<18){p.setColor(Color.rgb(67,70,77));c.drawRect(0,ground,540,bottom,p);p.setColor(Color.rgb(120,111,84));c.drawRect(0,ground,540,ground+10,p);for(int x=0;x<540;x+=32){p.setColor(Color.rgb(47,50,57));c.drawRect(x,bottom-22,x+20,bottom-18,p);}}else{p.setColor(Color.rgb(24,33,52));c.drawRect(0,ground,540,bottom,p);p.setColor(CYAN);for(int x=0;x<540;x+=64)c.drawRect(x,ground+7,x+38,ground+10,p);p.setColor(Color.rgb(11,19,32));c.drawRect(0,bottom-22,540,bottom,p);}}
+
+    private void drawAmbient(Canvas c,float ground,int s){long now=System.currentTimeMillis();float walk=(now%9000)/9000f;if(s<12){tree(c,35,ground-5,1f);tree(c,495,ground-4,.9f);if(s>=3)tree(c,75,ground-3,.65f);}if(s>=12&&s<18){for(int i=0;i<3;i++){float x=45+i*180;p.setColor(Color.rgb(95,109,119));c.drawRect(x,ground-34,x+8,ground,p);p.setColor(Color.rgb(245,158,11));c.drawRect(x+1,ground-39,x+7,ground-33,p);}}for(int i=0;i<Math.min(5,1+s/4);i++){float x=((walk*600+i*130)%620)-40;worker(c,x,ground-18,i,s);}}
+
+    private void worker(Canvas c,float x,float y,int i,int s){int body=s>=15?CYAN:(i%2==0?Color.rgb(52,97,160):Color.rgb(158,88,63));p.setColor(Color.rgb(237,200,166));c.drawRect(x,y-13,x+6,y-7,p);p.setColor(body);c.drawRect(x-1,y-7,x+7,y+5,p);p.setColor(Color.rgb(20,25,35));c.drawRect(x,y+5,x+2,y+12,p);c.drawRect(x+5,y+5,x+7,y+12,p);if(s>=15){p.setColor(PURPLE);c.drawRect(x+1,y-11,x+5,y-9,p);}}
+    private void tree(Canvas c,float x,float y,float z){p.setColor(Color.rgb(87,57,39));c.drawRect(x-3*z,y-28*z,x+3*z,y,p);p.setColor(Color.rgb(35,111,61));c.drawRect(x-14*z,y-46*z,x+14*z,y-22*z,p);c.drawRect(x-9*z,y-56*z,x+9*z,y-36*z,p);}
+
+    private void drawStructure(Canvas c,float cx,float ground,int s,float progress){float g=.78f+.22f*progress;if(s==0)leanTo(c,cx,ground,g);else if(s==1)hut(c,cx,ground,g);else if(s==2)cabins(c,cx,ground,g,1);else if(s==3)farm(c,cx,ground,g);else if(s==4)cabins(c,cx,ground,g,3);else if(s==5)village(c,cx,ground,g);else if(s<=11)castle(c,cx,ground,g,s);else if(s<=15)industrial(c,cx,ground,g,s);else future(c,cx,ground,g,s);}
+    private void leanTo(Canvas c,float cx,float ground,float g){float w=135*g,h=78*g;p.setColor(Color.rgb(84,54,35));c.drawRect(cx-w/2,ground-h*.12f,cx+w/2,ground,p);for(int i=0;i<7;i++){p.setColor(i%2==0?Color.rgb(127,84,47):Color.rgb(108,69,40));float x=cx-w/2+i*w/7;c.drawRect(x,ground-h,x+w/7+2,ground-h*.08f,p);}p.setColor(Color.rgb(62,40,28));c.drawRect(cx-8,ground-h*.75f,cx+8,ground,p);}
+    private void hut(Canvas c,float cx,float ground,float g){float w=150*g,h=92*g;p.setColor(Color.rgb(130,82,48));c.drawRect(cx-w/2,ground-h*.65f,cx+w/2,ground,p);p.setColor(Color.rgb(82,50,34));c.drawRect(cx-w*.58f,ground-h*.78f,cx+w*.58f,ground-h*.62f,p);c.drawRect(cx-w*.42f,ground-h*.92f,cx+w*.42f,ground-h*.76f,p);p.setColor(Color.rgb(249,210,91));c.drawRect(cx-w*.28f,ground-h*.44f,cx-w*.10f,ground-h*.25f,p);p.setColor(Color.rgb(56,39,30));c.drawRect(cx+w*.14f,ground-h*.45f,cx+w*.33f,ground,p);}
+    private void cabins(Canvas c,float cx,float ground,float g,int count){for(int i=0;i<count;i++){float x=cx+(i-(count-1)/2f)*125*g;hut(c,x,ground-(i%2)*5,g*(count>1?.72f:1f));}}
+    private void farm(Canvas c,float cx,float ground,float g){hut(c,cx-55*g,ground,g*.9f);p.setColor(Color.rgb(136,45,39));c.drawRect(cx+35*g,ground-72*g,cx+120*g,ground,p);p.setColor(Color.rgb(91,39,35));c.drawRect(cx+27*g,ground-78*g,cx+128*g,ground-66*g,p);c.drawRect(cx+42*g,ground-88*g,cx+113*g,ground-76*g,p);p.setColor(Color.rgb(255,235,150));c.drawRect(cx+55*g,ground-50*g,cx+72*g,ground-32*g,p);c.drawRect(cx+87*g,ground-50*g,cx+104*g,ground-32*g,p);}
+    private void village(Canvas c,float cx,float ground,float g){cabins(c,cx,ground,g*.82f,3);p.setColor(Color.rgb(118,105,84));c.drawRect(cx-38,ground-116*g,cx+38,ground,p);p.setColor(Color.rgb(69,67,63));c.drawRect(cx-48,ground-124*g,cx+48,ground-112*g,p);p.setColor(GOLD);c.drawRect(cx-8,ground-80*g,cx+8,ground-63*g,p);}
+
+    private void castle(Canvas c,float cx,float ground,float g,int s){int towers=2+(s>=9?2:0);float bodyW=(190+(s-6)*13)*g,bodyH=(105+(s-6)*12)*g;int stone=s>=10?Color.rgb(187,181,171):Color.rgb(119,126,132);p.setColor(stone);c.drawRect(cx-bodyW/2,ground-bodyH,cx+bodyW/2,ground,p);for(int i=0;i<towers;i++){float tx=cx-bodyW/2+i*(bodyW/(towers-1));float tw=42*g,th=bodyH+42*g+(i%2)*12;p.setColor(stone);c.drawRect(tx-tw/2,ground-th,tx+tw/2,ground,p);battlement(c,tx-tw/2,ground-th,tw,stone);}battlement(c,cx-bodyW/2,ground-bodyH,bodyW,stone);p.setColor(Color.rgb(63,49,44));c.drawRect(cx-18*g,ground-48*g,cx+18*g,ground,p);for(int x=-70;x<=70;x+=35){p.setColor(Color.rgb(254,220,112));c.drawRect(cx+x*g-5,ground-bodyH+30*g,cx+x*g+5,ground-bodyH+43*g,p);}if(s>=10){p.setColor(PURPLE);c.drawRect(cx-3,ground-bodyH-80*g,cx+3,ground-bodyH,p);c.drawRect(cx+3,ground-bodyH-79*g,cx+38,ground-bodyH-68*g,p);}}
+    private void battlement(Canvas c,float x,float y,float w,int col){p.setColor(col);for(float xx=x;xx<x+w;xx+=18){c.drawRect(xx,y-12,Math.min(xx+11,x+w),y+3,p);}}
+
+    private void industrial(Canvas c,float cx,float ground,float g,int s){float w=(210+(s-12)*22)*g,h=(115+(s-12)*20)*g;p.setColor(Color.rgb(71,78,88));c.drawRect(cx-w/2,ground-h,cx+w/2,ground,p);for(int i=0;i<3+(s-12);i++){float x=cx-w/2+28+i*45;p.setColor(Color.rgb(250,190,60));c.drawRect(x,ground-h+26,x+18,ground-h+45,p);}p.setColor(Color.rgb(48,55,65));c.drawRect(cx-w/2+22,ground-h-95*g,cx-w/2+47,ground-h,p);c.drawRect(cx+w/2-56,ground-h-68*g,cx+w/2-34,ground-h,p);float smoke=(System.currentTimeMillis()%4000)/4000f;for(int i=0;i<3;i++){p.setColor(Color.argb(120-i*25,190,198,205));float yy=ground-h-112*g-i*20-smoke*18;c.drawRect(cx-w/2+16-i*7,yy,cx-w/2+53+i*7,yy+14,p);}if(s>=13){p.setColor(CYAN);for(int y=0;y<4;y++)c.drawRect(cx-w/2+12,ground-h+18+y*24,cx+w/2-12,ground-h+20+y*24,p);}if(s>=15){p.setColor(PURPLE);c.drawRect(cx-w/2-8,ground-h-9,cx+w/2+8,ground-h-3,p);text(c,"PIXEL",cx,ground-h-17,14,CYAN,Paint.Align.CENTER);}}
+
+    private void future(Canvas c,float cx,float ground,float g,int s){float baseW=(185+(s-16)*10)*g;float h=(150+(s-16)*35)*g;int dark=Color.rgb(26,37,58),metal=Color.rgb(56,75,102);p.setColor(dark);c.drawRect(cx-baseW/2,ground-h*.72f,cx+baseW/2,ground,p);p.setColor(metal);c.drawRect(cx-baseW*.34f,ground-h,cx+baseW*.34f,ground,p);for(int i=0;i<7;i++){float y=ground-h+22+i*(h-38)/7;p.setColor(i%2==0?CYAN:PURPLE);c.drawRect(cx-baseW*.26f,y,cx+baseW*.26f,y+5,p);}p.setColor(Color.rgb(10,18,32));c.drawRect(cx-17,ground-64,cx+17,ground,p);if(s>=17){p.setColor(Color.argb(100,34,211,238));c.drawRect(cx-baseW*.48f,ground-h*.68f,cx+baseW*.48f,ground-h*.64f,p);}if(s>=18){floatingPlatform(c,cx-150,ground-h*.55f,.75f);floatingPlatform(c,cx+150,ground-h*.42f,.65f);}if(s>=19){p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(7);p.setColor(Color.argb(190,150,220,255));c.drawOval(new RectF(cx-150,ground-h-78,cx+150,ground-h+5),p);p.setStyle(Paint.Style.FILL);}if(s>=20){p.setColor(Color.rgb(180,190,205));c.drawRect(cx-120,ground-38,cx-80,ground,p);c.drawRect(cx+80,ground-50,cx+125,ground,p);}if(s>=21){p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(9);p.setColor(PURPLE);c.drawOval(new RectF(cx-210,ground-h*.73f,cx+210,ground-h*.34f),p);p.setStyle(Paint.Style.FILL);}if(s>=22){for(int i=0;i<5;i++){p.setColor(Color.argb(80+i*24,100,220,255));float off=i*12;c.drawRect(cx-baseW*.34f-off,ground-h-off,cx+baseW*.34f+off,ground-h+4-off,p);}}if(s>=23){p.setColor(Color.rgb(245,245,255));c.drawRect(cx-7,ground-h-118,cx+7,ground-h+5,p);p.setColor(CYAN);c.drawRect(cx-2,ground-h-180,cx+2,ground-h-118,p);for(int i=0;i<4;i++){p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(3);p.setColor(i%2==0?CYAN:PURPLE);float r=65+i*22;c.drawCircle(cx,ground-h-40,r,p);}p.setStyle(Paint.Style.FILL);}}
+    private void floatingPlatform(Canvas c,float x,float y,float g){p.setColor(Color.rgb(30,43,64));c.drawRect(x-50*g,y-10*g,x+50*g,y+10*g,p);p.setColor(CYAN);c.drawRect(x-37*g,y+11*g,x+37*g,y+15*g,p);p.setColor(Color.argb(80,80,220,255));c.drawRect(x-25*g,y+15*g,x+25*g,y+35*g,p);}
+
+    private void drawWorldHud(Canvas c,float top,float bottom){
+        float cardY=top+12;panel(c,12,cardY,355,cardY+74,Color.argb(210,10,18,31),Color.argb(160,100,140,190),10);
+        text(c,L10n.stageName(state.language,state.stage),28,cardY+27,16,TEXT,Paint.Align.LEFT);text(c,L10n.t(state.language,"stage")+" "+(state.stage+1)+"/24  •  "+L10n.t(state.language,"level")+" "+state.level+"/288",28,cardY+49,9,MUTED,Paint.Align.LEFT);
+        progress(c,28,cardY+59,330,cardY+67,(float)state.levelProgress(),state.stage>=18?CYAN:GOLD);
+        if(state.canClaimDaily()){button(c,370,cardY,528,cardY+74,L10n.t(state.language,"daily"),GOLD,BG,true);hits.add(new Hit(new RectF(370,cardY,528,cardY+74),"daily",""));}
+        float hintY=bottom-91;panel(c,75,hintY,465,hintY+47,Color.argb(185,8,15,27),Color.argb(150,255,255,255),12);text(c,L10n.t(state.language,"tap_anywhere"),270,hintY+20,9,TEXT,Paint.Align.CENTER);text(c,"+"+state.format(state.getTapPower())+"  •  "+L10n.t(state.language,"combo")+" x"+Math.max(1,combo),270,hintY+38,10,GOLD,Paint.Align.CENTER);
     }
 
-    private void consumeAchievementToast() {
-        if (!state.justUnlocked.isEmpty() && System.currentTimeMillis() > toastUntil) {
-            GameState.Achievement a = state.justUnlocked.remove(0);
-            showToast("OSIĄGNIĘCIE: " + a.title + "  +" + a.gemReward + " klej.", 2600);
-        }
-    }
+    private void drawUpgrades(Canvas c,float top,float bottom){header(c,L10n.t(state.language,"upgrades"),"18 × "+L10n.t(state.language,"upgrades"),top);List<GameState.Upgrade> all=new ArrayList<>(state.upgrades.values());int per=6,pages=(all.size()+per-1)/per;upgradePage=Math.max(0,Math.min(pages-1,upgradePage));float y=top+58;int start=upgradePage*per,end=Math.min(all.size(),start+per);float row=Math.min(88,(bottom-y-54-(end-start-1)*7)/(end-start));for(int i=start;i<end;i++){GameState.Upgrade u=all.get(i);float y2=y+row;boolean unlocked=state.stage>=u.def.unlockStage,can=state.canBuyUpgrade(u.def.id);panel(c,12,y,528,y2,PANEL,unlocked?(u.def.tap?GOLD:GREEN):Color.rgb(44,52,66),10);p.setColor(u.def.tap?GOLD:GREEN);c.drawRect(13,y+1,18,y2-1,p);text(c,L10n.upgradeName(state.language,u.def.id),31,y+25,13,unlocked?TEXT:MUTED,Paint.Align.LEFT);String desc=unlocked?L10n.upgradeDesc(state.language,u.def.tap,u.def.value)+"  •  "+L10n.t(state.language,"lvl")+" "+u.level:L10n.t(state.language,"locked")+" • "+L10n.t(state.language,"stage")+" "+(u.def.unlockStage+1);text(c,desc,31,y+48,9,MUTED,Paint.Align.LEFT);if(unlocked){text(c,state.format(u.cost()),500,y+29,13,can?GOLD:MUTED,Paint.Align.RIGHT);text(c,L10n.t(state.language,"buy"),500,y+51,9,can?GREEN:MUTED,Paint.Align.RIGHT);hits.add(new Hit(new RectF(12,y,528,y2),"upgrade",u.def.id));}y=y2+7;}pager(c,bottom,pages,upgradePage,"up_prev","up_next");}
 
-    private void showToast(String text, long ms) {
-        toastText = text;
-        toastUntil = System.currentTimeMillis() + ms;
-    }
+    private void drawGoals(Canvas c,float top,float bottom){header(c,goalMode==0?L10n.t(state.language,"missions"):L10n.t(state.language,"achievement"),goalMode==0?state.missionsClaimed+"/"+state.missions.size():state.unlockedAchievementCount()+"/"+state.achievements.size(),top);float toggleY=top+47;button(c,12,toggleY,260,toggleY+38,L10n.t(state.language,"missions"),goalMode==0?GOLD:PANEL2,goalMode==0?BG:TEXT,true);button(c,280,toggleY,528,toggleY+38,L10n.t(state.language,"achievement"),goalMode==1?PURPLE:PANEL2,goalMode==1?BG:TEXT,true);hits.add(new Hit(new RectF(12,toggleY,260,toggleY+38),"goal_mode","0"));hits.add(new Hit(new RectF(280,toggleY,528,toggleY+38),"goal_mode","1"));float y=toggleY+50;if(goalMode==0)drawMissions(c,y,bottom);else drawAchievements(c,y,bottom);}
+    private void drawMissions(Canvas c,float y,float bottom){int per=5,pages=(state.missions.size()+per-1)/per;missionPage=Math.max(0,Math.min(pages-1,missionPage));int start=missionPage*per,end=Math.min(state.missions.size(),start+per);float row=Math.min(105,(bottom-y-53-(end-start-1)*8)/(end-start));for(int i=start;i<end;i++){GameState.Mission m=state.missions.get(i);float y2=y+row;boolean ready=state.missionReady(m);int border=m.claimed?GREEN:ready?GOLD:STROKE;panel(c,12,y,528,y2,PANEL,border,10);text(c,L10n.t(state.language,"mission")+" #"+(i+1),29,y+24,10,m.claimed?GREEN:GOLD,Paint.Align.LEFT);text(c,state.goalText(m.type,m.target),29,y+49,12,m.claimed?MUTED:TEXT,Paint.Align.LEFT);double val=state.goalValue(m.type);progress(c,29,y+62,390,y+70,(float)Math.min(1,val/Math.max(1,m.target)),m.claimed?GREEN:GOLD);text(c,"+"+m.researchReward+" ◇  +"+m.crystalReward+" ◆",498,y+28,10,CYAN,Paint.Align.RIGHT);if(m.claimed)text(c,L10n.t(state.language,"completed"),498,y+58,9,GREEN,Paint.Align.RIGHT);else if(ready){text(c,L10n.t(state.language,"claim"),498,y+58,10,GOLD,Paint.Align.RIGHT);hits.add(new Hit(new RectF(12,y,528,y2),"mission",Integer.toString(i)));}y=y2+8;}pager(c,bottom,pages,missionPage,"mission_prev","mission_next");}
+    private void drawAchievements(Canvas c,float y,float bottom){int per=6,pages=(state.achievements.size()+per-1)/per;missionPage=Math.max(0,Math.min(pages-1,missionPage));int start=missionPage*per,end=Math.min(state.achievements.size(),start+per);float row=Math.min(83,(bottom-y-53-(end-start-1)*7)/(end-start));for(int i=start;i<end;i++){GameState.Achievement a=state.achievements.get(i);float y2=y+row;panel(c,12,y,528,y2,PANEL,a.unlocked?GREEN:STROKE,10);diamond(c,35,y+row/2,9,a.unlocked?GREEN:Color.rgb(70,83,104));text(c,L10n.t(state.language,"achievement")+" #"+(i+1),57,y+25,10,a.unlocked?GREEN:MUTED,Paint.Align.LEFT);text(c,state.goalText(a.type,a.target),57,y+49,11,a.unlocked?TEXT:MUTED,Paint.Align.LEFT);text(c,"+"+a.reward+" ◆",500,y+40,10,a.unlocked?PURPLE:MUTED,Paint.Align.RIGHT);y=y2+7;}pager(c,bottom,pages,missionPage,"mission_prev","mission_next");}
 
-    @Override protected void onDraw(Canvas canvas) {
-        super.onDraw(canvas);
-        scale = getWidth() / DESIGN_W;
-        if (scale <= 0) scale = 1;
-        logicalH = getHeight() / scale;
-        canvas.save();
-        canvas.scale(scale, scale);
-        hits.clear();
-        p.setShader(null);
-        p.setStyle(Paint.Style.FILL);
-        p.setColor(BG);
-        canvas.drawRect(0, 0, DESIGN_W, logicalH, p);
+    private void drawResearch(Canvas c,float top,float bottom){header(c,L10n.t(state.language,"research"),L10n.t(state.language,"research_points")+": "+state.researchPoints,top);List<GameContent.ResearchDef> all=GameContent.research();int per=6,pages=(all.size()+per-1)/per;researchPage=Math.max(0,Math.min(pages-1,researchPage));float y=top+58;int start=researchPage*per,end=Math.min(all.size(),start+per);float row=Math.min(88,(bottom-y-54-(end-start-1)*7)/(end-start));for(int i=start;i<end;i++){GameContent.ResearchDef r=all.get(i);float y2=y+row;boolean owned=state.research.contains(r.id),unlocked=state.stage>=r.unlockStage,can=state.canResearch(r.id);panel(c,12,y,528,y2,PANEL,owned?CYAN:unlocked?PURPLE:STROKE,10);diamond(c,36,y+row/2,10,owned?CYAN:unlocked?PURPLE:Color.rgb(62,73,92));text(c,L10n.researchName(state.language,r.id),60,y+27,12,owned?TEXT:unlocked?TEXT:MUTED,Paint.Align.LEFT);text(c,L10n.researchDesc(state.language,r.kind,r.bonus),60,y+51,9,MUTED,Paint.Align.LEFT);if(owned)text(c,L10n.t(state.language,"owned"),500,y+39,9,CYAN,Paint.Align.RIGHT);else if(unlocked){text(c,r.cost+" ◇",500,y+28,11,can?PURPLE:MUTED,Paint.Align.RIGHT);text(c,L10n.t(state.language,"unlock"),500,y+51,9,can?GREEN:MUTED,Paint.Align.RIGHT);hits.add(new Hit(new RectF(12,y,528,y2),"research",r.id));}else text(c,L10n.t(state.language,"stage")+" "+(r.unlockStage+1),500,y+39,9,MUTED,Paint.Align.RIGHT);y=y2+7;}pager(c,bottom,pages,researchPage,"res_prev","res_next");}
 
-        drawTopBar(canvas);
-        float contentTop = 94f;
-        float contentBottom = logicalH - 76f;
-        if (tab == 0) drawCityTab(canvas, contentTop, contentBottom);
-        else if (tab == 1) drawShopTab(canvas, contentTop, contentBottom);
-        else if (tab == 2) drawAchievementsTab(canvas, contentTop, contentBottom);
-        else if (tab == 3) drawPrestigeTab(canvas, contentTop, contentBottom);
-        else drawSettingsTab(canvas, contentTop, contentBottom);
+    private void drawMenu(Canvas c,float top,float bottom){header(c,L10n.t(state.language,"menu"),"Pixel Empire 2.0",top);float y=top+54;panel(c,12,y,528,y+116,PANEL,state.availableLegacyStars()>0?GOLD:STROKE,12);text(c,L10n.t(state.language,"prestige"),29,y+28,15,TEXT,Paint.Align.LEFT);text(c,L10n.t(state.language,"prestige_desc"),29,y+51,9,MUTED,Paint.Align.LEFT);int gain=state.availableLegacyStars();text(c,gain>0?"+"+gain+" ★":L10n.t(state.language,"prestige_need"),500,y+31,10,gain>0?GOLD:MUTED,Paint.Align.RIGHT);String asc=System.currentTimeMillis()<ascendArmedUntil?L10n.t(state.language,"prestige_ready")+"?":L10n.t(state.language,"prestige");button(c,29,y+69,511,y+104,asc,gain>0?GOLD:PANEL2,gain>0?BG:MUTED,gain>0);if(gain>0)hits.add(new Hit(new RectF(29,y+69,511,y+104),"ascend",""));y+=130;
+        setting(c,y,L10n.t(state.language,"sound"),state.soundEnabled,"sound");y+=58;setting(c,y,L10n.t(state.language,"haptics"),state.hapticsEnabled,"haptic");y+=58;setting(c,y,L10n.t(state.language,"notation"),state.compactNumbers,"notation");y+=58;setting(c,y,L10n.t(state.language,"low_power"),state.lowPower,"power");y+=58;
+        panel(c,12,y,528,y+54,PANEL,STROKE,9);text(c,L10n.t(state.language,"language"),29,y+33,11,TEXT,Paint.Align.LEFT);text(c,L10n.languageLabel(state.language)+"  ›",500,y+33,11,CYAN,Paint.Align.RIGHT);hits.add(new Hit(new RectF(12,y,528,y+54),"setting","lang"));y+=66;
+        panel(c,12,y,528,Math.min(bottom-68,y+118),PANEL,STROKE,10);stat(c,y+25,L10n.t(state.language,"total_earned"),state.format(state.lifetimeCoins));stat(c,y+48,L10n.t(state.language,"total_taps"),Long.toString(state.totalTaps));stat(c,y+71,L10n.t(state.language,"best_combo"),"x"+state.bestCombo);stat(c,y+94,L10n.t(state.language,"play_time"),GameState.formatDuration(state.playSeconds));
+        float ry=bottom-55;String rt=System.currentTimeMillis()<resetArmedUntil?L10n.t(state.language,"reset_confirm"):L10n.t(state.language,"reset");button(c,12,ry,528,bottom-6,rt,Color.rgb(69,28,35),RED,true);hits.add(new Hit(new RectF(12,ry,528,bottom-6),"reset",""));}
 
-        drawEventBanner(canvas);
-        drawBottomNav(canvas);
-        drawFloatTexts(canvas);
-        drawToast(canvas);
-        if (offlinePopup) drawOfflinePopup(canvas);
-        if (!state.tutorialSeen) drawTutorial(canvas);
-        canvas.restore();
-    }
+    private void setting(Canvas c,float y,String label,boolean on,String id){panel(c,12,y,528,y+52,PANEL,STROKE,9);text(c,label,29,y+32,11,TEXT,Paint.Align.LEFT);p.setColor(on?GREEN:Color.rgb(60,72,92));c.drawRoundRect(new RectF(448,y+14,508,y+38),12,12,p);p.setColor(Color.WHITE);c.drawCircle(on?496:460,y+26,9,p);hits.add(new Hit(new RectF(12,y,528,y+52),"setting",id));}
+    private void stat(Canvas c,float y,String l,String v){text(c,l,29,y,9,MUTED,Paint.Align.LEFT);text(c,v,500,y,10,TEXT,Paint.Align.RIGHT);}
 
-    private void drawTopBar(Canvas c) {
-        panel(c, 12, 10, 528, 86, PANEL, STROKE, 12);
-        pixelCoin(c, 38, 48, 19, GOLD);
-        text(c, state.format(state.coins), 67, 44, 25, TEXT, Paint.Align.LEFT);
-        text(c, state.format(state.getCps()) + " / sek.", 68, 69, 12, MUTED, Paint.Align.LEFT);
+    private void header(Canvas c,String title,String sub,float top){text(c,title,18,top+27,19,TEXT,Paint.Align.LEFT);text(c,sub,522,top+27,9,MUTED,Paint.Align.RIGHT);p.setColor(Color.rgb(37,50,70));c.drawRect(18,top+40,522,top+42,p);}
+    private void pager(Canvas c,float bottom,int pages,int page,String prev,String next){if(pages<=1)return;float y=bottom-42;button(c,12,y,145,bottom-4,"‹",PANEL2,TEXT,page>0);button(c,395,y,528,bottom-4,"›",PANEL2,TEXT,page<pages-1);text(c,(page+1)+" / "+pages,270,y+25,10,MUTED,Paint.Align.CENTER);hits.add(new Hit(new RectF(12,y,145,bottom-4),prev,""));hits.add(new Hit(new RectF(395,y,528,bottom-4),next,""));}
 
-        text(c, "KLEJNOTY", 395, 35, 9, MUTED, Paint.Align.CENTER);
-        pixelDiamond(c, 357, 54, 11, PURPLE);
-        text(c, Integer.toString(state.gems), 377, 61, 16, TEXT, Paint.Align.LEFT);
+    private void drawEvent(Canvas c){if(state.activeEventType<0||offlinePopup||!state.tutorialSeen)return;float y=86;int col=state.activeEventType==0?GOLD:state.activeEventType==1?PURPLE:state.activeEventType==2?RED:state.activeEventType==3?GREEN:CYAN;String key=state.activeEventType==0?"event_gold":state.activeEventType==1?"event_crystal":state.activeEventType==2?"event_frenzy":state.activeEventType==3?"event_auto":"event_xp";panel(c,44,y,496,y+42,Color.argb(235,12,20,34),col,12);text(c,L10n.t(state.language,key),62,y+27,10,col,Paint.Align.LEFT);long left=Math.max(0,(state.activeEventUntil-System.currentTimeMillis()+999)/1000);text(c,left+"s",480,y+27,9,TEXT,Paint.Align.RIGHT);hits.add(new Hit(new RectF(44,y,496,y+42),"event",""));}
 
-        text(c, "RDZENIE", 474, 35, 9, MUTED, Paint.Align.CENTER);
-        pixelDiamond(c, 442, 54, 10, CYAN);
-        text(c, Integer.toString(state.prestigeCores), 460, 61, 16, TEXT, Paint.Align.LEFT);
-    }
+    private void drawNav(Canvas c){float y=logicalH-70;p.setColor(Color.rgb(7,13,24));c.drawRect(0,y,540,logicalH,p);p.setColor(Color.rgb(38,51,72));c.drawRect(0,y,540,y+2,p);String[] labels={L10n.t(state.language,"world"),L10n.t(state.language,"upgrades"),L10n.t(state.language,"missions"),L10n.t(state.language,"research"),L10n.t(state.language,"menu")};float w=108;for(int i=0;i<5;i++){float x=i*w;if(tab==i){p.setColor(Color.rgb(20,31,51));c.drawRect(x+4,y+4,x+w-4,logicalH-4,p);p.setColor(GOLD);c.drawRect(x+23,y+4,x+w-23,y+7,p);}navIcon(c,i,x+w/2,y+24,tab==i?GOLD:MUTED);text(c,labels[i],x+w/2,y+55,7.5f,tab==i?TEXT:MUTED,Paint.Align.CENTER);hits.add(new Hit(new RectF(x,y,x+w,logicalH),"tab",Integer.toString(i)));}}
+    private void navIcon(Canvas c,int i,float x,float y,int col){p.setColor(col);if(i==0){c.drawRect(x-13,y-2,x+13,y+13,p);c.drawRect(x-8,y-12,x+8,y+15,p);}else if(i==1){c.drawRect(x-13,y-10,x+13,y-4,p);c.drawRect(x-10,y,x+10,y+13,p);}else if(i==2){p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(3);c.drawRect(x-12,y-11,x+12,y+14,p);c.drawLine(x-7,y-3,x+7,y-3,p);c.drawLine(x-7,y+4,x+7,y+4,p);p.setStyle(Paint.Style.FILL);}else if(i==3){diamond(c,x,y,12,col);}else{c.drawCircle(x,y+1,11,p);p.setColor(BG);c.drawCircle(x,y+1,4,p);}}
 
-    private void drawCityTab(Canvas c, float top, float bottom) {
-        float cityBottom = Math.min(bottom - 170, top + 440);
-        drawPixelCity(c, top + 4, cityBottom);
+    private void drawFx(Canvas c){for(Particle q:particles){int a=(int)(255*Math.max(0,Math.min(1,q.life)));p.setColor((q.color&0x00ffffff)|(a<<24));c.drawRect(q.x-q.size/2,q.y-q.size/2,q.x+q.size/2,q.y+q.size/2,p);}for(Floating f:floats){int a=(int)(255*Math.max(0,Math.min(1,f.life)));text(c,f.text,f.x,f.y,14,(f.color&0xffffff)|(a<<24),Paint.Align.CENTER);}}
+    private void drawToast(Canvas c){if(toast.isEmpty()||System.currentTimeMillis()>=toastUntil)return;float y=logicalH-128;panel(c,48,y,492,y+44,Color.argb(240,13,22,38),GOLD,11);text(c,toast,270,y+28,10,TEXT,Paint.Align.CENTER);}
 
-        float coreY = top + 226;
-        RectF coreHit = new RectF(190, coreY - 78, 350, coreY + 82);
-        hits.add(new HitTarget(coreHit, "tap", ""));
-        drawCore(c, 270, coreY, 62);
-        text(c, "KLIKNIJ RDZEŃ", 270, coreY + 92, 13, MUTED, Paint.Align.CENTER);
-        text(c, "+" + state.format(state.getClickValue()) + " bazowo", 270, coreY + 112, 11, GOLD, Paint.Align.CENTER);
-        if (combo >= 2 && System.currentTimeMillis() - lastTapAt < 900) {
-            text(c, "COMBO x" + combo, 270, coreY - 92, 14, GREEN, Paint.Align.CENTER);
-        }
+    private void drawOffline(Canvas c){p.setColor(Color.argb(220,0,0,0));c.drawRect(0,0,540,logicalH,p);float h=300,y=(logicalH-h)/2;panel(c,40,y,500,y+h,Color.rgb(13,22,38),GOLD,18);coin(c,270,y+55,25);text(c,L10n.t(state.language,"welcome_back"),270,y+103,20,TEXT,Paint.Align.CENTER);text(c,L10n.t(state.language,"away")+": "+GameState.formatDuration(state.startupOfflineSeconds),270,y+136,10,MUTED,Paint.Align.CENTER);text(c,L10n.t(state.language,"offline"),270,y+164,10,MUTED,Paint.Align.CENTER);text(c,"+"+state.format(state.startupOfflineGain),270,y+202,27,GOLD,Paint.Align.CENTER);if(state.startupOfflineLevels>0)text(c,"+"+state.startupOfflineLevels+" "+L10n.t(state.language,"level"),270,y+225,10,CYAN,Paint.Align.CENTER);button(c,85,y+246,455,y+284,L10n.t(state.language,"continue"),GOLD,BG,true);hits.add(new Hit(new RectF(40,y,500,y+h),"offline",""));}
 
-        float statsY = cityBottom + 10;
-        float cardH = 66;
-        statCard(c, 12, statsY, 174, statsY + cardH, "KLIK", state.format(state.getClickValue()), GOLD);
-        statCard(c, 183, statsY, 357, statsY + cardH, "AUTO", state.format(state.getCps()) + "/s", GREEN);
-        statCard(c, 366, statsY, 528, statsY + cardH, "BONUS", String.format(Locale.US, "x%.1f", state.prestigeMultiplier()), CYAN);
+    private void drawTutorial(Canvas c){p.setColor(Color.argb(232,2,7,16));c.drawRect(0,0,540,logicalH,p);float y=logicalH/2-180;panel(c,32,y,508,y+360,Color.rgb(12,21,37),GOLD,18);String body;if(tutorialStep==0)body=L10n.t(state.language,"tutorial_1");else if(tutorialStep==1)body=L10n.t(state.language,"tutorial_2");else if(tutorialStep==2)body=L10n.t(state.language,"tutorial_3");else body=L10n.t(state.language,"tutorial_4");drawMiniLogo(c,270,y+80,tutorialStep);text(c,L10n.t(state.language,"tutorial_title"),270,y+145,23,TEXT,Paint.Align.CENTER);wrapText(c,body,270,y+193,420,12,MUTED);text(c,(tutorialStep+1)+" / 4",270,y+280,10,MUTED,Paint.Align.CENTER);text(c,L10n.t(state.language,"tap_continue"),270,y+326,11,GOLD,Paint.Align.CENTER);}
+    private void drawMiniLogo(Canvas c,float x,float y,int step){if(step==0){hut(c,x,y+40,.55f);}else if(step==1){coin(c,x,y,25);diamond(c,x+45,y,13,PURPLE);}else if(step==2){castle(c,x,y+55,.45f,9);}else future(c,x,y+70,.35f,23);}
 
-        float dailyY = statsY + cardH + 10;
-        boolean ready = state.canClaimDaily();
-        int dailyColor = ready ? GOLD : PANEL_2;
-        button(c, 12, dailyY, 528, Math.min(bottom - 5, dailyY + 66),
-                ready ? "ODBIERZ CODZIENNĄ NAGRODĘ  •  seria " + Math.max(1, state.dailyStreak) + "/7" :
-                        "CODZIENNA NAGRODA ODEBRANA  •  seria " + state.dailyStreak + "/7",
-                dailyColor, ready ? BG : MUTED, ready);
-        if (ready) hits.add(new HitTarget(new RectF(12, dailyY, 528, Math.min(bottom - 5, dailyY + 66)), "daily", ""));
-    }
+    private void wrapText(Canvas c,String s,float x,float y,float maxW,float size,int color){String[] words=s.split(" ");String line="";int n=0;for(String w:words){String test=line.isEmpty()?w:line+" "+w;tp.setTextSize(size);if(tp.measureText(test)>maxW&&!line.isEmpty()){text(c,line,x,y+n*20,size,color,Paint.Align.CENTER);n++;line=w;}else line=test;}if(!line.isEmpty())text(c,line,x,y+n*20,size,color,Paint.Align.CENTER);}
 
-    private void drawPixelCity(Canvas c, float top, float bottom) {
-        boolean night = LocalTime.now().getHour() < 6 || LocalTime.now().getHour() >= 20;
-        int sky1 = night ? Color.rgb(15, 23, 54) : Color.rgb(56, 118, 196);
-        int sky2 = night ? Color.rgb(30, 41, 89) : Color.rgb(125, 211, 252);
-        p.setShader(new LinearGradient(0, top, 0, bottom, sky1, sky2, Shader.TileMode.CLAMP));
-        c.drawRoundRect(new RectF(12, top, 528, bottom), 12, 12, p);
-        p.setShader(null);
-        strokeRound(c, 12, top, 528, bottom, STROKE, 12, 2);
-
-        if (night) {
-            for (int i = 0; i < 18; i++) {
-                float x = 27 + ((i * 79) % 480);
-                float y = top + 18 + ((i * 37) % Math.max(60, (int)(bottom - top - 130)));
-                pixel(c, x, y, (i % 3 == 0 ? 4 : 2), Color.rgb(226, 232, 240));
-            }
-            pixel(c, 462, top + 42, 22, Color.rgb(254, 249, 195));
-        } else {
-            pixel(c, 465, top + 40, 28, Color.rgb(253, 224, 71));
-            cloud(c, 78, top + 55, 1.0f);
-            cloud(c, 410, top + 92, 0.8f);
-        }
-
-        float groundY = bottom - 78;
-        p.setColor(Color.rgb(35, 71, 55)); c.drawRect(13, groundY, 527, bottom - 1, p);
-        p.setColor(Color.rgb(55, 90, 60)); c.drawRect(13, groundY, 527, groundY + 12, p);
-        p.setColor(Color.rgb(54, 45, 37)); c.drawRect(13, bottom - 24, 527, bottom - 1, p);
-
-        int tier = state.cityTier();
-        for (int i = 0; i < 6 + tier; i++) {
-            float bw = 34 + (i % 3) * 8;
-            float bh = 48 + ((i * 31 + tier * 17) % 75) + tier * 8;
-            float bx = 26 + i * (470f / (5 + tier));
-            float by = groundY - bh;
-            building(c, bx, by, bw, bh, i, tier, true);
-        }
-        if (tier == 0) {
-            hut(c, 43, groundY - 48);
-            hut(c, 430, groundY - 42);
-        } else {
-            building(c, 44, groundY - 104 - tier * 8, 72, 104 + tier * 8, 7, tier, false);
-            building(c, 414, groundY - 86 - tier * 10, 74, 86 + tier * 10, 9, tier, false);
-        }
-        if (tier >= 2) building(c, 131, groundY - 132 - tier * 9, 74, 132 + tier * 9, 12, tier, false);
-        if (tier >= 3) building(c, 338, groundY - 150 - tier * 12, 62, 150 + tier * 12, 15, tier, false);
-        if (tier >= 4) {
-            p.setColor(Color.rgb(103, 232, 249));
-            c.drawRect(258, groundY - 180, 282, groundY, p);
-            p.setColor(Color.rgb(23, 37, 84));
-            c.drawRect(263, groundY - 174, 277, groundY - 8, p);
-        }
-        if (tier >= 5) {
-            p.setColor(PURPLE);
-            c.drawRect(240, top + 48, 300, top + 56, p);
-            c.drawRect(248, top + 40, 292, top + 64, p);
-            p.setColor(Color.rgb(30, 27, 75));
-            c.drawRect(258, top + 46, 282, top + 58, p);
-        }
-        text(c, "POZIOM MIASTA " + (tier + 1) + "/6", 26, top + 24, 10, Color.argb(210, 255,255,255), Paint.Align.LEFT);
-    }
-
-    private void building(Canvas c, float x, float y, float w, float h, int seed, int tier, boolean back) {
-        int body = back ? Color.rgb(42, 55, 78) : (tier >= 4 ? Color.rgb(46, 64, 83) : Color.rgb(67, 74, 91));
-        p.setColor(body); c.drawRect(x, y, x+w, y+h, p);
-        p.setColor(Color.rgb(30, 41, 59)); c.drawRect(x, y, x+w, y+6, p);
-        int cols = Math.max(2, (int)(w / 17));
-        int rows = Math.max(2, (int)(h / 21));
-        for (int r=0;r<rows;r++) for(int col=0;col<cols;col++) {
-            if (((r*cols+col+seed)%4)==0 && back) continue;
-            float wx=x+7+col*15, wy=y+13+r*20;
-            p.setColor(((r+col+seed)%3)==0 ? Color.rgb(253,224,71) : Color.rgb(125,211,252));
-            c.drawRect(wx, wy, Math.min(x+w-5, wx+7), Math.min(y+h-5, wy+8), p);
-        }
-        if (!back && tier>=3) {
-            p.setColor(CYAN); c.drawRect(x+w-4, y+8, x+w, y+h-8, p);
-        }
-    }
-
-    private void hut(Canvas c, float x, float y) {
-        p.setColor(Color.rgb(120, 80, 50)); c.drawRect(x, y+15, x+58, y+48, p);
-        p.setColor(Color.rgb(87, 49, 33));
-        c.drawRect(x-7, y+10, x+65, y+18, p); c.drawRect(x+4, y+3, x+54, y+11, p);
-        p.setColor(Color.rgb(253,224,71)); c.drawRect(x+12,y+25,x+23,y+36,p);
-        p.setColor(Color.rgb(60,40,30)); c.drawRect(x+37,y+25,x+50,y+48,p);
-    }
-
-    private void cloud(Canvas c, float x, float y, float s) {
-        p.setColor(Color.argb(210,255,255,255));
-        c.drawRect(x, y+8*s, x+58*s, y+20*s, p);
-        c.drawRect(x+10*s, y, x+44*s, y+25*s, p);
-    }
-
-    private void drawCore(Canvas c, float x, float y, float r) {
-        p.setColor(Color.argb(35, 251,191,36)); c.drawCircle(x,y,r+24,p);
-        p.setColor(GOLD_DARK);
-        c.drawRect(x-r, y-r+12, x+r, y+r-12, p);
-        c.drawRect(x-r+12, y-r, x+r-12, y+r, p);
-        p.setColor(GOLD);
-        c.drawRect(x-r+9, y-r+18, x+r-9, y+r-18, p);
-        c.drawRect(x-r+18, y-r+9, x+r-18, y+r-9, p);
-        p.setColor(Color.rgb(255,247,214));
-        c.drawRect(x-20,y-28,x+5,y-3,p);
-        p.setColor(Color.rgb(245,158,11));
-        c.drawRect(x+8,y+9,x+29,y+30,p);
-        strokeRound(c, x-r-1,y-r-1,x+r+1,y+r+1, Color.rgb(120,53,15), 18, 3);
-    }
-
-    private void drawShopTab(Canvas c, float top, float bottom) {
-        text(c, "ULEPSZENIA IMPERIUM", 18, top + 24, 18, TEXT, Paint.Align.LEFT);
-        text(c, "Kupuj kolejne poziomy. Cena rośnie wraz z poziomem.", 18, top + 44, 10, MUTED, Paint.Align.LEFT);
-        float y = top + 56;
-        float avail = bottom - y - 4;
-        float rowH = Math.min(72f, Math.max(55f, (avail - 8*6f) / 9f));
-        for (GameState.Upgrade u : state.upgrades.values()) {
-            float y2 = y + rowH;
-            boolean can = state.coins + 1e-9 >= u.cost();
-            panel(c, 12, y, 528, y2, PANEL, can ? Color.rgb(71,85,105) : Color.rgb(42,52,70), 8);
-            int accent = u.click ? GOLD : GREEN;
-            p.setColor(accent); c.drawRect(13, y+1, 18, y2-1, p);
-            text(c, u.name, 29, y + 22, 13, TEXT, Paint.Align.LEFT);
-            text(c, u.description + "  •  poz. " + u.level, 29, y + 42, 10, MUTED, Paint.Align.LEFT);
-            text(c, state.format(u.cost()), 505, y + 28, 13, can ? GOLD : MUTED, Paint.Align.RIGHT);
-            text(c, "KUP", 505, y + 48, 9, can ? GREEN : Color.rgb(100,116,139), Paint.Align.RIGHT);
-            hits.add(new HitTarget(new RectF(12, y, 528, y2), "upgrade", u.id));
-            y = y2 + 6;
-        }
-    }
-
-    private void drawAchievementsTab(Canvas c, float top, float bottom) {
-        int unlocked = state.unlockedAchievementCount();
-        text(c, "OSIĄGNIĘCIA", 18, top + 24, 18, TEXT, Paint.Align.LEFT);
-        text(c, unlocked + "/" + state.achievements.size() + " odblokowanych  •  nagrody wpadają automatycznie", 18, top + 44, 10, MUTED, Paint.Align.LEFT);
-        int perPage = 8;
-        int pages = (state.achievements.size() + perPage - 1) / perPage;
-        achievementPage = Math.max(0, Math.min(pages - 1, achievementPage));
-        float y = top + 58;
-        float footer = 48;
-        float rowH = Math.min(76f, (bottom - y - footer - 7*6f) / 8f);
-        int start = achievementPage * perPage;
-        int end = Math.min(state.achievements.size(), start + perPage);
-        for (int i=start;i<end;i++) {
-            GameState.Achievement a = state.achievements.get(i);
-            float y2=y+rowH;
-            int border = a.unlocked ? GREEN : Color.rgb(51,65,85);
-            panel(c, 12,y,528,y2,PANEL,border,8);
-            if (a.unlocked) pixelDiamond(c,34,y+rowH/2,10,GREEN);
-            else {
-                p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(2); p.setColor(MUTED);
-                c.drawRect(25,y+rowH/2-8,41,y+rowH/2+8,p); p.setStyle(Paint.Style.FILL);
-            }
-            text(c,a.title,55,y+23,12,a.unlocked?TEXT:MUTED,Paint.Align.LEFT);
-            text(c,a.description,55,y+42,9,MUTED,Paint.Align.LEFT);
-            text(c,"+"+a.gemReward,497,y+30,11,a.unlocked?PURPLE:MUTED,Paint.Align.RIGHT);
-            pixelDiamond(c,508,y+26,7,a.unlocked?PURPLE:Color.rgb(71,85,105));
-            y=y2+6;
-        }
-        float fy = bottom - 40;
-        if (pages > 1) {
-            button(c, 12, fy, 160, bottom-2, "< POPRZ.", PANEL_2, TEXT, achievementPage > 0);
-            button(c, 380, fy, 528, bottom-2, "DALEJ >", PANEL_2, TEXT, achievementPage < pages-1);
-            text(c, (achievementPage+1)+" / "+pages,270,fy+25,12,MUTED,Paint.Align.CENTER);
-            hits.add(new HitTarget(new RectF(12,fy,160,bottom-2),"ach_prev",""));
-            hits.add(new HitTarget(new RectF(380,fy,528,bottom-2),"ach_next",""));
-        }
-    }
-
-    private void drawPrestigeTab(Canvas c, float top, float bottom) {
-        text(c, "RDZEŃ IMPERIUM", 18, top + 24, 18, TEXT, Paint.Align.LEFT);
-        text(c, "Resetuj ekonomię, zachowaj postęp meta i zyskaj stały mnożnik.", 18, top + 44, 10, MUTED, Paint.Align.LEFT);
-
-        float y=top+60;
-        panel(c,12,y,528,y+150,PANEL,CYAN,12);
-        pixelDiamond(c,60,y+52,24,CYAN);
-        text(c,Integer.toString(state.prestigeCores),102,y+52,32,TEXT,Paint.Align.LEFT);
-        text(c,"RDZENI IMPERIUM",103,y+77,10,MUTED,Paint.Align.LEFT);
-        text(c,String.format(Locale.US,"stały bonus x%.2f",state.prestigeMultiplier()),103,y+101,13,CYAN,Paint.Align.LEFT);
-        int gain=state.availablePrestigeCores();
-        text(c,"Ten reset: +"+gain+" rdzeni",500,y+45,12,gain>0?GREEN:MUTED,Paint.Align.RIGHT);
-        text(c,"Zarobek tej ery: "+state.format(state.runCoinsEarned),500,y+69,10,MUTED,Paint.Align.RIGHT);
-        text(c,"Próg startowy: 1.00M",500,y+91,9,MUTED,Paint.Align.RIGHT);
-
-        float py=y+162;
-        boolean can=gain>0;
-        String ptxt;
-        if (prestigeConfirmStage==1 && System.currentTimeMillis()<prestigeConfirmUntil) ptxt="DOTKNIJ JESZCZE RAZ — RESET ERY";
-        else ptxt=can?"PRESTIGE  •  +"+gain+" RDZENI":"PRESTIGE ODBLOKUJE SIĘ OD 1.00M / ERĘ";
-        button(c,12,py,528,py+64,ptxt,can?CYAN:PANEL_2,can?BG:MUTED,can);
-        hits.add(new HitTarget(new RectF(12,py,528,py+64),"prestige",""));
-
-        float by=py+82;
-        text(c,"BOOSTERY ZA KLEJNOTY",18,by,13,TEXT,Paint.Align.LEFT);
-        by+=14;
-        panel(c,12,by,258,by+126,PANEL,STROKE,10);
-        text(c,"TURBO",28,by+28,15,GREEN,Paint.Align.LEFT);
-        text(c,"x2 dochód automatyczny",28,by+50,9,MUTED,Paint.Align.LEFT);
-        text(c,"5 minut",28,by+68,9,MUTED,Paint.Align.LEFT);
-        long turboLeft=Math.max(0,(state.turboUntil-System.currentTimeMillis())/1000);
-        if(turboLeft>0) text(c,"AKTYWNE: "+GameState.formatDuration(turboLeft),28,by+91,9,GREEN,Paint.Align.LEFT);
-        button(c,28,by+93,242,by+118,"10 KLEJ.  •  AKTYWUJ",GREEN,BG,state.gems>=10);
-        hits.add(new HitTarget(new RectF(28,by+93,242,by+118),"turbo",""));
-
-        panel(c,270,by,528,by+126,PANEL,STROKE,10);
-        text(c,"FRENZY",286,by+28,15,GOLD,Paint.Align.LEFT);
-        text(c,"x3 siła kliknięcia",286,by+50,9,MUTED,Paint.Align.LEFT);
-        text(c,"2 minuty",286,by+68,9,MUTED,Paint.Align.LEFT);
-        long frenzyLeft=Math.max(0,(state.frenzyUntil-System.currentTimeMillis())/1000);
-        if(frenzyLeft>0) text(c,"AKTYWNE: "+GameState.formatDuration(frenzyLeft),286,by+91,9,GOLD,Paint.Align.LEFT);
-        button(c,286,by+93,512,by+118,"8 KLEJ.  •  AKTYWUJ",GOLD,BG,state.gems>=8);
-        hits.add(new HitTarget(new RectF(286,by+93,512,by+118),"frenzy",""));
-
-        float infoY=by+142;
-        panel(c,12,infoY,528,Math.min(bottom-2,infoY+105),PANEL,STROKE,10);
-        text(c,"CO ZOSTAJE PO PRESTIGE?",28,infoY+26,11,TEXT,Paint.Align.LEFT);
-        text(c,"✓ Rdzenie i stały mnożnik   ✓ klejnoty   ✓ osiągnięcia",28,infoY+49,9,GREEN,Paint.Align.LEFT);
-        text(c,"✓ statystyki całkowite   ✓ serie dzienne",28,infoY+69,9,GREEN,Paint.Align.LEFT);
-        text(c,"Reset: monety, ulepszenia i aktywne boostery.",28,infoY+90,9,MUTED,Paint.Align.LEFT);
-    }
-
-    private void drawSettingsTab(Canvas c, float top, float bottom) {
-        text(c,"OPCJE I STATYSTYKI",18,top+24,18,TEXT,Paint.Align.LEFT);
-        text(c,"Pixel Empire Clicker  •  v1.0.0",18,top+44,10,MUTED,Paint.Align.LEFT);
-        float y=top+62;
-        settingsToggle(c,y,"DŹWIĘKI",state.soundEnabled,"sound"); y+=62;
-        settingsToggle(c,y,"WIBRACJE",state.hapticsEnabled,"haptic"); y+=62;
-        settingsToggle(c,y,"NOTACJA NAUKOWA",state.scientificNotation,"notation"); y+=76;
-
-        text(c,"STATYSTYKI",18,y,13,TEXT,Paint.Align.LEFT); y+=14;
-        panel(c,12,y,528,y+184,PANEL,STROKE,10);
-        statLine(c,y+28,"Łącznie zarobione",state.format(state.lifetimeCoins));
-        statLine(c,y+54,"Łącznie kliknięć",Long.toString(state.totalClicks));
-        statLine(c,y+80,"Najlepsze combo","x"+state.bestCombo);
-        statLine(c,y+106,"Najlepszy klik",state.format(state.bestTap));
-        statLine(c,y+132,"Najwyższe / sek.",state.format(state.maxCps));
-        statLine(c,y+158,"Czas w grze",GameState.formatDuration(state.playSeconds));
-        statLine(c,y+180,"Prestige / eventy",state.prestigeCount+" / "+state.eventsCollected);
-        y+=202;
-        String resetText=System.currentTimeMillis()<resetArmedUntil?"NA PEWNO? DOTKNIJ PONOWNIE":"WYCZYŚĆ CAŁY ZAPIS";
-        button(c,12,y,528,Math.min(bottom-4,y+58),resetText,Color.rgb(70,27,33),RED,true);
-        hits.add(new HitTarget(new RectF(12,y,528,Math.min(bottom-4,y+58)),"reset",""));
-    }
-
-    private void settingsToggle(Canvas c,float y,String label,boolean on,String id) {
-        panel(c,12,y,528,y+52,PANEL,STROKE,9);
-        text(c,label,28,y+32,12,TEXT,Paint.Align.LEFT);
-        p.setColor(on?GREEN:Color.rgb(71,85,105));
-        c.drawRoundRect(new RectF(442,y+13,510,y+39),13,13,p);
-        p.setColor(Color.WHITE);
-        float cx=on?496:456; c.drawCircle(cx,y+26,10,p);
-        hits.add(new HitTarget(new RectF(12,y,528,y+52),"setting",id));
-    }
-
-    private void statLine(Canvas c,float y,String label,String value) {
-        text(c,label,28,y,9,MUTED,Paint.Align.LEFT);
-        text(c,value,512,y,10,TEXT,Paint.Align.RIGHT);
-    }
-
-    private void drawEventBanner(Canvas c) {
-        if (state.activeEventType < 0 || offlinePopup || !state.tutorialSeen) return;
-        float y=96;
-        int color=state.activeEventType==0?GOLD:state.activeEventType==1?PURPLE:GREEN;
-        String label=state.activeEventType==0?"ZŁOTY DRON — ODBIERZ MONETY":state.activeEventType==1?"DRON KLEJNOTÓW — ZŁAP GO":"AWARIA SIECI — 60 s TURBO";
-        long left=Math.max(0,(state.activeEventUntil-System.currentTimeMillis()+999)/1000);
-        panel(c,40,y,500,y+42,Color.rgb(18,27,45),color,10);
-        text(c,label,58,y+26,10,color,Paint.Align.LEFT);
-        text(c,left+" s",484,y+26,10,TEXT,Paint.Align.RIGHT);
-        hits.add(new HitTarget(new RectF(40,y,500,y+42),"event",""));
-    }
-
-    private void drawBottomNav(Canvas c) {
-        float y=logicalH-70;
-        p.setColor(Color.rgb(10,16,29)); c.drawRect(0,y-6,DESIGN_W,logicalH,p);
-        p.setColor(Color.rgb(30,41,59)); c.drawRect(0,y-6,DESIGN_W,y-4,p);
-        String[] labels={"MIASTO","SKLEP","CELE","RDZEŃ","OPCJE"};
-        float w=DESIGN_W/5f;
-        for(int i=0;i<5;i++) {
-            float x=i*w;
-            if(tab==i){p.setColor(PANEL_2);c.drawRoundRect(new RectF(x+5,y,x+w-5,logicalH-7),9,9,p);p.setColor(GOLD);c.drawRect(x+24,y,x+w-24,y+3,p);}
-            int iconColor=tab==i?GOLD:MUTED;
-            drawNavIcon(c,i,x+w/2,y+18,iconColor);
-            text(c,labels[i],x+w/2,y+49,8,tab==i?TEXT:MUTED,Paint.Align.CENTER);
-            hits.add(new HitTarget(new RectF(x,y-4,x+w,logicalH),"tab",Integer.toString(i)));
-        }
-    }
-
-    private void drawNavIcon(Canvas c,int i,float x,float y,int color){
-        p.setColor(color);
-        if(i==0){c.drawRect(x-12,y,x+12,y+14,p);c.drawRect(x-7,y-7,x+7,y+16,p);}
-        else if(i==1){c.drawRect(x-13,y-7,x+13,y-1,p);c.drawRect(x-10,y+2,x+10,y+15,p);}
-        else if(i==2){p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(3);c.drawRect(x-12,y-8,x+12,y+16,p);c.drawLine(x-7,y,x+7,y,p);c.drawLine(x-7,y+6,x+7,y+6,p);p.setStyle(Paint.Style.FILL);}
-        else if(i==3){pixelDiamond(c,x,y+4,13,color);}
-        else {c.drawCircle(x,y+4,12,p);p.setColor(BG);c.drawCircle(x,y+4,5,p);}
-    }
-
-    private void drawFloatTexts(Canvas c) {
-        for(FloatText f:floatTexts){
-            int alpha=(int)(255*Math.max(0,Math.min(1,f.life)));
-            int col=(f.color&0x00FFFFFF)|(alpha<<24);
-            text(c,f.text,f.x,f.y,15,col,Paint.Align.CENTER);
-        }
-    }
-
-    private void drawToast(Canvas c) {
-        if(toastText.isEmpty()||System.currentTimeMillis()>=toastUntil)return;
-        float y=logicalH-126;
-        panel(c,54,y,486,y+42,Color.rgb(15,23,42),GOLD,10);
-        text(c,toastText,270,y+26,10,TEXT,Paint.Align.CENTER);
-    }
-
-    private void drawOfflinePopup(Canvas c) {
-        p.setColor(Color.argb(210,0,0,0));c.drawRect(0,0,DESIGN_W,logicalH,p);
-        float h=274,y=(logicalH-h)/2f;
-        panel(c,44,y,496,y+h,Color.rgb(15,23,42),GOLD,16);
-        pixelCoin(c,270,y+58,28,GOLD);
-        text(c,"WITAJ Z POWROTEM",270,y+105,19,TEXT,Paint.Align.CENTER);
-        text(c,"Nie było Cię: "+GameState.formatDuration(state.startupOfflineSeconds),270,y+135,11,MUTED,Paint.Align.CENTER);
-        text(c,"Dochód offline (75%):",270,y+159,10,MUTED,Paint.Align.CENTER);
-        text(c,"+"+state.format(state.startupOfflineGain),270,y+193,25,GOLD,Paint.Align.CENTER);
-        button(c,88,y+218,452,y+258,"ODBIERZ I GRAJ",GOLD,BG,true);
-        hits.add(new HitTarget(new RectF(44,y,496,y+h),"offline",""));
-    }
-
-    private void drawTutorial(Canvas c) {
-        p.setColor(Color.argb(225,3,7,18));c.drawRect(0,0,DESIGN_W,logicalH,p);
-        float y=logicalH/2f-170;
-        panel(c,34,y,506,y+340,Color.rgb(15,23,42),GOLD,16);
-        String title,body1,body2;
-        if(tutorialStep==0){title="PIXEL EMPIRE";body1="Zbuduj imperium od jednego kliknięcia.";body2="Dotknij ekranu, aby rozpocząć samouczek.";drawCore(c,270,y+86,42);}
-        else if(tutorialStep==1){title="1. KLIKANIE I AUTO";body1="Klikaj Rdzeń, zdobywaj monety i combo.";body2="W Sklepie kupisz też automatyczny dochód.";pixelCoin(c,270,y+88,32,GOLD);}
-        else {title="2. ROZWIJAJ IMPERIUM";body1="Cele dają klejnoty, a Prestige — stały bonus.";body2="Gra nalicza też dochód, gdy jest wyłączona.";pixelDiamond(c,270,y+88,34,CYAN);}
-        text(c,title,270,y+155,19,TEXT,Paint.Align.CENTER);
-        text(c,body1,270,y+194,11,MUTED,Paint.Align.CENTER);
-        text(c,body2,270,y+217,11,MUTED,Paint.Align.CENTER);
-        text(c,tutorialStep<2?"DOTKNIJ, ABY DALEJ":"DOTKNIJ — ZACZYNAMY",270,y+300,12,GOLD,Paint.Align.CENTER);
-    }
-
-    @Override public boolean onTouchEvent(MotionEvent e) {
-        float x=e.getX()/scale,y=e.getY()/scale;
-        if(e.getAction()==MotionEvent.ACTION_DOWN){downX=x;downY=y;moved=false;return true;}
-        if(e.getAction()==MotionEvent.ACTION_MOVE){if(Math.abs(x-downX)>12||Math.abs(y-downY)>12)moved=true;return true;}
-        if(e.getAction()==MotionEvent.ACTION_UP){
-            performClick();
-            if(moved)return true;
-            if(!state.tutorialSeen){
-                tutorialStep++;
-                if(tutorialStep>=3){state.tutorialSeen=true;state.save(getContext());showToast("Powodzenia! Zbuduj własne imperium.",2200);}
-                invalidate();return true;
-            }
-            if(offlinePopup){offlinePopup=false;playFeedback(false);invalidate();return true;}
-            for(int i=hits.size()-1;i>=0;i--){HitTarget h=hits.get(i);if(h.rect.contains(x,y)){handleHit(h,x,y);break;}}
-            return true;
-        }
-        return true;
-    }
-
+    @Override public boolean onTouchEvent(MotionEvent e){float x=e.getX()/scale,y=e.getY()/scale;if(e.getAction()==MotionEvent.ACTION_DOWN){downX=x;downY=y;moved=false;return true;}if(e.getAction()==MotionEvent.ACTION_MOVE){if(Math.abs(x-downX)>13||Math.abs(y-downY)>13)moved=true;return true;}if(e.getAction()==MotionEvent.ACTION_UP){performClick();if(moved)return true;if(!state.tutorialSeen){tutorialStep++;if(tutorialStep>=4){state.tutorialSeen=true;state.save(getContext());showToast("Pixel Empire",1300);}invalidate();return true;}if(offlinePopup){offlinePopup=false;playFeedback(false);invalidate();return true;}for(int i=hits.size()-1;i>=0;i--){Hit h=hits.get(i);if(h.r.contains(x,y)){handleHit(h,x,y);break;}}return true;}return true;}
     @Override public boolean performClick(){super.performClick();return true;}
 
-    private void handleHit(HitTarget h,float x,float y){
-        switch(h.type){
-            case "tab": tab=Integer.parseInt(h.id); playFeedback(false); break;
-            case "tap": doTap(x,y); break;
-            case "upgrade":
-                if(state.buyUpgrade(h.id)){playFeedback(false);showToast("Kupiono: "+state.upgrades.get(h.id).name,900);}else{playError();showToast("Za mało monet",900);}break;
-            case "daily":
-                if(state.canClaimDaily()){int g=state.claimDaily();playFeedback(true);showToast("Nagroda dzienna! +"+g+" klej.",1800);}break;
-            case "event":
-                if(state.activeEventType>=0){int type=state.activeEventType;state.collectEvent(type);playFeedback(true);showToast(type==0?"Dron przejęty — monety zdobyte!":type==1?"Złapano klejnoty!":"Turbo aktywne przez 60 s!",1900);}break;
-            case "ach_prev": if(achievementPage>0)achievementPage--; break;
-            case "ach_next": if(achievementPage<1)achievementPage++; break;
-            case "turbo": if(state.buyTurbo()){playFeedback(true);showToast("TURBO x2 aktywne przez 5 min",1700);}else{playError();showToast("Potrzebujesz 10 klejnotów",1200);}break;
-            case "frenzy": if(state.buyFrenzy()){playFeedback(true);showToast("FRENZY x3 aktywne przez 2 min",1700);}else{playError();showToast("Potrzebujesz 8 klejnotów",1200);}break;
-            case "prestige": handlePrestige(); break;
-            case "setting": handleSetting(h.id); break;
-            case "reset": handleReset(); break;
-        }
-        state.save(getContext());
-        invalidate();
-    }
+    private void handleHit(Hit h,float x,float y){switch(h.type){
+        case "tab":tab=Integer.parseInt(h.id);playFeedback(false);break;
+        case "tap":doTap(x,y);break;
+        case "daily":if(state.canClaimDaily()){int r=state.claimDaily();showToast(L10n.t(state.language,"daily")+" +"+r+" ◆",1800);burst(x,y,GOLD,22);playFeedback(true);}break;
+        case "event":int t=state.activeEventType;state.collectEvent(t);showToast(t==1?"+◆":t==4?"XP x4":"BOOST!",1600);burst(x,y,t==1?PURPLE:t==4?CYAN:GOLD,32);playFeedback(true);break;
+        case "upgrade":if(state.buyUpgrade(h.id)){showToast(L10n.upgradeName(state.language,h.id)+" +1",850);playFeedback(false);}else{showToast("…",600);playError();}break;
+        case "up_prev":if(upgradePage>0)upgradePage--;break;case "up_next":if(upgradePage<2)upgradePage++;break;
+        case "goal_mode":goalMode=Integer.parseInt(h.id);missionPage=0;break;
+        case "mission":int mi=Integer.parseInt(h.id);if(state.claimMission(mi)){showToast(L10n.t(state.language,"reward")+"!",1000);burst(x,y,CYAN,16);playFeedback(true);}break;
+        case "mission_prev":if(missionPage>0)missionPage--;break;case "mission_next":missionPage++;break;
+        case "research":if(state.buyResearch(h.id)){showToast(L10n.researchName(state.language,h.id),1100);burst(x,y,PURPLE,18);playFeedback(true);}else playError();break;
+        case "res_prev":if(researchPage>0)researchPage--;break;case "res_next":if(researchPage<2)researchPage++;break;
+        case "setting":setting(h.id);break;case "ascend":ascend();break;case "reset":reset();break;case "offline":offlinePopup=false;break;
+    }state.save(getContext());invalidate();}
 
-    private void doTap(float x,float y){
-        long now=System.currentTimeMillis();
-        if(now-lastTapAt<=850)combo=Math.min(50,combo+1);else combo=1;
-        lastTapAt=now;
-        boolean crit=random.nextDouble()<0.055;
-        double amount=state.tap(combo,crit);
-        floatTexts.add(new FloatText(x,y-14,(crit?"KRYTYK! +":"+")+state.format(amount),crit?PURPLE:GOLD));
-        if(floatTexts.size()>16)floatTexts.remove(0);
-        playFeedback(crit);
-    }
+    private void doTap(float x,float y){long now=System.currentTimeMillis();if(now-lastTapAt<=780)combo=Math.min(50,combo+1);else combo=1;lastTapAt=now;boolean crit=random.nextDouble()<.06;double amount=state.tap(combo,crit);floats.add(new Floating(x,y-14,(crit?L10n.t(state.language,"critical")+" ":"+")+state.format(amount),crit?PURPLE:GOLD));if(floats.size()>18)floats.remove(0);burst(x,y,crit?PURPLE:GOLD,crit?18:8);playFeedback(crit);}
+    private void burst(float x,float y,int color,int n){for(int i=0;i<n;i++){double a=random.nextDouble()*Math.PI*2;float sp=30+random.nextFloat()*105;particles.add(new Particle(x,y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp-35,.45f+random.nextFloat()*.55f,2+random.nextFloat()*5,color));}while(particles.size()>100)particles.remove(0);}
 
-    private void handlePrestige(){
-        int gain=state.availablePrestigeCores();
-        if(gain<=0){playError();showToast("Najpierw zarób 1.00M monet w tej erze",1400);return;}
-        long now=System.currentTimeMillis();
-        if(prestigeConfirmStage==0||now>prestigeConfirmUntil){prestigeConfirmStage=1;prestigeConfirmUntil=now+5000;showToast("Prestige resetuje monety i ulepszenia — dotknij ponownie",2500);return;}
-        if(state.prestige()){prestigeConfirmStage=0;playFeedback(true);showToast("NOWE IMPERIUM! +"+gain+" Rdzeni",2500);tab=0;}
-    }
+    private void setting(String id){if("sound".equals(id))state.soundEnabled=!state.soundEnabled;else if("haptic".equals(id))state.hapticsEnabled=!state.hapticsEnabled;else if("notation".equals(id))state.compactNumbers=!state.compactNumbers;else if("power".equals(id))state.lowPower=!state.lowPower;else if("lang".equals(id))state.language=L10n.nextLang(state.language);playFeedback(false);}
+    private void ascend(){int gain=state.availableLegacyStars();if(gain<=0)return;long now=System.currentTimeMillis();if(now>ascendArmedUntil){ascendArmedUntil=now+5000;showToast(L10n.t(state.language,"prestige")+"?  +"+gain+" ★",1800);return;}if(state.ascend()){ascendArmedUntil=0;tab=0;showToast("+"+gain+" ★",2200);burst(270,380,GOLD,45);playFeedback(true);lastSeenLevel=state.level;lastSeenStage=state.stage;}}
+    private void reset(){long now=System.currentTimeMillis();if(now>resetArmedUntil){resetArmedUntil=now+5000;showToast(L10n.t(state.language,"reset_confirm"),1800);playError();return;}state.hardReset(getContext());postDelayed(()->((Activity)getContext()).recreate(),350);}
 
-    private void handleSetting(String id){
-        if("sound".equals(id))state.soundEnabled=!state.soundEnabled;
-        else if("haptic".equals(id))state.hapticsEnabled=!state.hapticsEnabled;
-        else if("notation".equals(id))state.scientificNotation=!state.scientificNotation;
-        playFeedback(false);
-    }
+    private void playFeedback(boolean strong){if(state.soundEnabled&&tone!=null)try{tone.startTone(strong?ToneGenerator.TONE_PROP_ACK:ToneGenerator.TONE_PROP_BEEP,strong?70:30);}catch(Throwable ignored){}if(state.hapticsEnabled&&vibrator!=null&&vibrator.hasVibrator())try{if(Build.VERSION.SDK_INT>=26)vibrator.vibrate(VibrationEffect.createOneShot(strong?38:14,strong?130:60));else vibrator.vibrate(strong?38:14);}catch(Throwable ignored){}}
+    private void playError(){if(state.soundEnabled&&tone!=null)try{tone.startTone(ToneGenerator.TONE_PROP_NACK,55);}catch(Throwable ignored){}if(state.hapticsEnabled&&vibrator!=null&&vibrator.hasVibrator())try{if(Build.VERSION.SDK_INT>=26)vibrator.vibrate(VibrationEffect.createOneShot(28,80));else vibrator.vibrate(28);}catch(Throwable ignored){}}
 
-    private void handleReset(){
-        long now=System.currentTimeMillis();
-        if(now>resetArmedUntil){resetArmedUntil=now+5000;playError();showToast("Dotknij ponownie w ciągu 5 s, aby usunąć zapis",2200);return;}
-        state.hardReset(getContext());
-        showToast("Zapis usunięty. Uruchamiam grę od nowa…",1800);
-        postDelayed(() -> {
-            android.app.Activity a=(android.app.Activity)getContext();
-            a.recreate();
-        },700);
-    }
-
-    private void playFeedback(boolean strong){
-        if(state.soundEnabled&&tone!=null){try{tone.startTone(strong?ToneGenerator.TONE_PROP_ACK:ToneGenerator.TONE_PROP_BEEP,strong?80:35);}catch(Throwable ignored){}}
-        if(state.hapticsEnabled&&vibrator!=null&&vibrator.hasVibrator()){
-            try{
-                if(Build.VERSION.SDK_INT>=26)vibrator.vibrate(VibrationEffect.createOneShot(strong?45:18,strong?150:70));
-                else vibrator.vibrate(strong?45:18);
-            }catch(Throwable ignored){}
-        }
-    }
-
-    private void playError(){
-        if(state.soundEnabled&&tone!=null){try{tone.startTone(ToneGenerator.TONE_PROP_NACK,70);}catch(Throwable ignored){}}
-        if(state.hapticsEnabled&&vibrator!=null&&vibrator.hasVibrator()){
-            try{if(Build.VERSION.SDK_INT>=26)vibrator.vibrate(VibrationEffect.createOneShot(35,90));else vibrator.vibrate(35);}catch(Throwable ignored){}
-        }
-    }
-
-    private void statCard(Canvas c,float x1,float y1,float x2,float y2,String label,String value,int accent){
-        panel(c,x1,y1,x2,y2,PANEL,STROKE,8);
-        text(c,label,(x1+x2)/2,y1+20,8,MUTED,Paint.Align.CENTER);
-        text(c,value,(x1+x2)/2,y1+45,14,accent,Paint.Align.CENTER);
-    }
-
-    private void panel(Canvas c,float x1,float y1,float x2,float y2,int fill,int stroke,float radius){
-        p.setShader(null);p.setStyle(Paint.Style.FILL);p.setColor(fill);c.drawRoundRect(new RectF(x1,y1,x2,y2),radius,radius,p);
-        strokeRound(c,x1,y1,x2,y2,stroke,radius,1.5f);
-    }
-
-    private void strokeRound(Canvas c,float x1,float y1,float x2,float y2,int color,float radius,float width){
-        p.setShader(null);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(width);p.setColor(color);c.drawRoundRect(new RectF(x1,y1,x2,y2),radius,radius,p);p.setStyle(Paint.Style.FILL);
-    }
-
-    private void button(Canvas c,float x1,float y1,float x2,float y2,String label,int fill,int color,boolean enabled){
-        p.setColor(enabled?fill:Color.rgb(38,48,66));c.drawRoundRect(new RectF(x1,y1,x2,y2),9,9,p);
-        strokeRound(c,x1,y1,x2,y2,enabled?lighten(fill):Color.rgb(71,85,105),9,1.5f);
-        text(c,label,(x1+x2)/2,(y1+y2)/2+4,10,enabled?color:MUTED,Paint.Align.CENTER);
-    }
-
-    private int lighten(int color){
-        return Color.rgb(Math.min(255,Color.red(color)+25),Math.min(255,Color.green(color)+25),Math.min(255,Color.blue(color)+25));
-    }
-
-    private void text(Canvas c,String s,float x,float y,float size,int color,Paint.Align align){
-        p.setShader(null);p.setStyle(Paint.Style.FILL);p.setColor(color);p.setTextSize(size);p.setTextAlign(align);p.setTypeface(Typeface.create(Typeface.MONOSPACE,Typeface.BOLD));
-        c.drawText(s,x,y,p);
-    }
-
-    private void pixel(Canvas c,float x,float y,float size,int color){p.setColor(color);c.drawRect(x-size/2,y-size/2,x+size/2,y+size/2,p);}
-
-    private void pixelCoin(Canvas c,float x,float y,float r,int color){
-        p.setColor(GOLD_DARK);c.drawRect(x-r,y-r/2,x+r,y+r/2,p);c.drawRect(x-r/2,y-r,x+r/2,y+r,p);
-        p.setColor(color);c.drawRect(x-r+4,y-r/2+2,x+r-4,y+r/2-2,p);c.drawRect(x-r/2+2,y-r+4,x+r/2-2,y+r-4,p);
-        p.setColor(Color.rgb(255,247,214));c.drawRect(x-r/3,y-r/2,x-1,y-2,p);
-    }
-
-    private void pixelDiamond(Canvas c,float x,float y,float r,int color){
-        p.setColor(color);
-        for(int i=0;i<(int)r;i+=3){float half=r-i;c.drawRect(x-half,y-r+i,x+half,y-r+i+3,p);c.drawRect(x-half,y+r-i-3,x+half,y+r-i,p);}
-        p.setColor(Color.argb(150,255,255,255));c.drawRect(x-r/3,y-r/2,x,y-r/4,p);
-    }
+    private void panel(Canvas c,float x1,float y1,float x2,float y2,int fill,int stroke,float radius){p.setShader(null);p.setStyle(Paint.Style.FILL);p.setColor(fill);c.drawRoundRect(new RectF(x1,y1,x2,y2),radius,radius,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1.5f);p.setColor(stroke);c.drawRoundRect(new RectF(x1,y1,x2,y2),radius,radius,p);p.setStyle(Paint.Style.FILL);}
+    private void button(Canvas c,float x1,float y1,float x2,float y2,String label,int fill,int color,boolean enabled){p.setColor(enabled?fill:Color.rgb(37,46,62));c.drawRoundRect(new RectF(x1,y1,x2,y2),9,9,p);text(c,label,(x1+x2)/2,(y1+y2)/2+4,9.5f,enabled?color:MUTED,Paint.Align.CENTER);}
+    private void progress(Canvas c,float x1,float y1,float x2,float y2,float v,int col){p.setColor(Color.rgb(39,50,68));c.drawRoundRect(new RectF(x1,y1,x2,y2),5,5,p);p.setColor(col);c.drawRoundRect(new RectF(x1,y1,x1+(x2-x1)*Math.max(0,Math.min(1,v)),y2),5,5,p);}
+    private void text(Canvas c,String s,float x,float y,float size,int color,Paint.Align align){tp.setShader(null);tp.setStyle(Paint.Style.FILL);tp.setColor(color);tp.setTextSize(size);tp.setTextAlign(align);tp.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));c.drawText(s,x,y,tp);}
+    private void pixel(Canvas c,float x,float y,float size,int col){p.setColor(col);c.drawRect(x-size/2,y-size/2,x+size/2,y+size/2,p);}
+    private void coin(Canvas c,float x,float y,float r){p.setColor(Color.rgb(180,110,8));c.drawRect(x-r,y-r/2,x+r,y+r/2,p);c.drawRect(x-r/2,y-r,x+r/2,y+r,p);p.setColor(GOLD);c.drawRect(x-r+3,y-r/2+2,x+r-3,y+r/2-2,p);c.drawRect(x-r/2+2,y-r+3,x+r/2-2,y+r-3,p);p.setColor(Color.rgb(255,245,190));c.drawRect(x-r/3,y-r/2,x-1,y-2,p);}
+    private void diamond(Canvas c,float x,float y,float r,int col){p.setColor(col);Path d=new Path();d.moveTo(x,y-r);d.lineTo(x+r,y);d.lineTo(x,y+r);d.lineTo(x-r,y);d.close();c.drawPath(d,p);p.setColor(Color.argb(130,255,255,255));c.drawRect(x-r*.28f,y-r*.48f,x,y-r*.18f,p);}
 }
