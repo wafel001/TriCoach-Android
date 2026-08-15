@@ -6,7 +6,6 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.view.WindowManager;
 
 public final class MainActivity extends Activity {
     private GameState state;
@@ -15,30 +14,21 @@ public final class MainActivity extends Activity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
         state = new GameState();
         state.load(this);
         gameView = new GameView(this, state);
         setContentView(gameView);
-
-        // DecorView/InsetsController are not guaranteed to exist before content is attached.
-        // Posting fullscreen setup avoids the startup NPE seen on Android 15/16.
         getWindow().getDecorView().post(this::enterFullscreen);
     }
 
     private void enterFullscreen() {
         View decor = getWindow().getDecorView();
         if (decor == null) return;
-
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController controller = decor.getWindowInsetsController();
             if (controller != null) {
                 controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(
-                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             }
         } else {
             decor.setSystemUiVisibility(
@@ -53,12 +43,16 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        getWindow().getDecorView().post(this::enterFullscreen);
+        View decor=getWindow().getDecorView();
+        if(decor!=null)decor.post(this::enterFullscreen);
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) getWindow().getDecorView().post(this::enterFullscreen);
+        if (hasFocus) {
+            View decor=getWindow().getDecorView();
+            if(decor!=null)decor.post(this::enterFullscreen);
+        }
     }
 
     @Override protected void onPause() {
