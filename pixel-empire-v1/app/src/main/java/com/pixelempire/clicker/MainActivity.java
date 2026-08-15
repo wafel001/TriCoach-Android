@@ -16,6 +16,21 @@ public final class MainActivity extends Activity {
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         state = new GameState();
         state.load(this);
+
+        // CI-only visual QA hook. It is ignored unless the debug build is launched
+        // explicitly with --ei demo_stage N, so normal players never see it.
+        if (BuildConfig.DEBUG) {
+            int demoStage = getIntent().getIntExtra("demo_stage", -1);
+            if (demoStage >= 0) {
+                demoStage = Math.max(0, Math.min(GameContent.STAGE_COUNT - 1, demoStage));
+                state.stage = demoStage;
+                state.level = Math.min(GameContent.MAX_LEVEL, demoStage * GameContent.LEVELS_PER_STAGE + 1);
+                state.buildXp = GameContent.xpForLevel(Math.max(1, state.level)) * 0.64;
+                state.coins = Math.pow(10, Math.min(18, demoStage + 2));
+                state.tutorialSeen = true;
+            }
+        }
+
         gameView = new GameView(this, state);
         setContentView(gameView);
         getWindow().getDecorView().post(this::enterFullscreen);
