@@ -1,4 +1,4 @@
-name: Build TriCoach APK and AAB
+name: Build TriCoach 3.0 APK
 
 on:
   push:
@@ -15,50 +15,44 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-      - name: Install Android SDK 36
-        run: yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" || true
+
+      - name: Install Android SDK
+        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Rebuild TriCoach 2.1 project
+
+      - name: Rebuild TriCoach 3.0 build 31 project
         run: |
-          cat payload/v2.part* | base64 --decode > tricoach-v2.zip
-          unzip -t tricoach-v2.zip
+          cat payload/v30build31.part* | base64 --decode > tricoach-v3-build31.zip
+          echo "a02ae53cdccce2a0fbc3aa2102cae83b0c4ce773e086347d81d73eca6e59a993  tricoach-v3-build31.zip" | sha256sum -c -
+          unzip -t tricoach-v3-build31.zip
           rm -rf buildsrc
           mkdir buildsrc
-          unzip -q tricoach-v2.zip -d buildsrc
-          cat payload/v21p00.part00 payload/v21p00.part01 payload/v21p00.part02 payload/v21p00.part03 payload/v21patch.part01 payload/v21patch.part02 payload/v21patch.part03 payload/v21patch.part04 payload/v21patch.part05 payload/v21patch.part06 payload/v21fix.part00 payload/v21fix.part01 payload/v21fix.part02 payload/v21fix.part03 payload/v21fix.part04 payload/v21fix.part05 | base64 --decode > v21-patch.zip
-          test "$(stat -c %s v21-patch.zip)" = "50756"
-          unzip -t v21-patch.zip
-          unzip -oq v21-patch.zip -d buildsrc/TriCoach_Android
-          test -f buildsrc/TriCoach_Android/settings.gradle
+          unzip -q tricoach-v3-build31.zip -d buildsrc
+          test -f buildsrc/tricoach_android/settings.gradle
+
       - name: Build install APK
-        working-directory: buildsrc/TriCoach_Android
+        working-directory: buildsrc/tricoach_android
         run: gradle --no-daemon :app:assembleDebug --stacktrace
-      - name: Build Play Store release bundle
-        working-directory: buildsrc/TriCoach_Android
-        run: gradle --no-daemon :app:bundleRelease --stacktrace
-      - name: Collect outputs
-        run: |
-          cp buildsrc/TriCoach_Android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v2.1-debug.apk
-          cp buildsrc/TriCoach_Android/app/build/outputs/bundle/release/app-release.aab TriCoach-v2.1-release-unsigned.aab
+
+      - name: Collect APK
+        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v3.0-build31.apk
+
       - name: Upload install APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-2.1-Android-APK
-          path: TriCoach-v2.1-debug.apk
-          if-no-files-found: error
-      - name: Upload Play Store bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: TriCoach-2.1-Play-AAB-unsigned
-          path: TriCoach-v2.1-release-unsigned.aab
+          name: TriCoach-v3.0-build31-APK
+          path: TriCoach-v3.0-build31.apk
           if-no-files-found: error
