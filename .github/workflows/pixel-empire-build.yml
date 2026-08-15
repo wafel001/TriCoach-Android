@@ -34,6 +34,13 @@ jobs:
           test -s pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
           sha256sum pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
 
+      - name: Enable KVM acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm || true
+
       - name: Emulator launch smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
