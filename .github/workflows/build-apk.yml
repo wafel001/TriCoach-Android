@@ -43,7 +43,7 @@ jobs:
 
       - name: Patch to TriCoach 4.0.1 build 41
         run: |
-          base64 --decode payload/tc401.patch.gz.b64 | gzip -dc > /tmp/tc401.patch
+          cat payload/tc401.patch.gz.b64.part0 payload/tc401.patch.gz.b64.part1 | base64 --decode | gzip -dc > /tmp/tc401.patch
           cd buildsrc
           patch -p1 < /tmp/tc401.patch
 
