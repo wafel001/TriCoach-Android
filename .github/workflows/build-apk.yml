@@ -1,4 +1,4 @@
-name: Build TriCoach 3.1 APK
+name: Build TriCoach 4.0 APK
 
 on:
   push:
@@ -35,50 +35,44 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Rebuild TriCoach 3.0 base
+      - name: Rebuild TriCoach 4.0 build 40 project
         run: |
-          cat payload/v30build31.part* | base64 --decode > tricoach-v3-build31.zip
-          echo "a02ae53cdccce2a0fbc3aa2102cae83b0c4ce773e086347d81d73eca6e59a993  tricoach-v3-build31.zip" | sha256sum -c -
-          unzip -t tricoach-v3-build31.zip
+          cat payload/v40build40.part* | base64 --decode > tricoach-v4-build40.zip
+          echo "6e2afc70609eefbf8d5ccdb755bab26770bb9d6abc99b39dfffdd749f92fea83  tricoach-v4-build40.zip" | sha256sum -c -
+          unzip -t tricoach-v4-build40.zip
           rm -rf buildsrc
           mkdir buildsrc
-          unzip -q tricoach-v3-build31.zip -d buildsrc
+          unzip -q tricoach-v4-build40.zip -d buildsrc
           test -f buildsrc/tricoach_android/settings.gradle
+          grep -q 'versionCode 40' buildsrc/tricoach_android/app/build.gradle
+          grep -q 'versionName "4.0"' buildsrc/tricoach_android/app/build.gradle
 
-      - name: Patch base to TriCoach 3.1 build 32
+      - name: Validate web app
         run: |
-          echo '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' | base64 --decode | gunzip > /tmp/patch_v31.py
-          python /tmp/patch_v31.py
-          grep -q "versionCode 32" buildsrc/tricoach_android/app/build.gradle
-          grep -q "versionName '3.1'" buildsrc/tricoach_android/app/build.gradle
-          grep -q "Coach 2.0" buildsrc/tricoach_android/app/src/main/assets/index.html
-
-      - name: Validate JavaScript
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          h=Path('buildsrc/tricoach_android/app/src/main/assets/index.html').read_text()
-          m=re.search(r'<script>(.*)</script>',h,re.S)
-          assert m
-          Path('/tmp/tricoach.js').write_text(m.group(1))
-          ids=set(re.findall(r'id="([^"]+)"',h))
-          refs=set(re.findall(r"\$\('([^']+)'\)",m.group(1)))
-          missing=refs-ids
-          assert not missing, f'Missing DOM ids: {missing}'
+          python3 - <<'PY'
+          import re, pathlib
+          p=pathlib.Path('buildsrc/tricoach_android/app/src/main/assets/index.html')
+          s=p.read_text()
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
+          pathlib.Path('/tmp/tricoach4.js').write_text('\n'.join(scripts))
+          ids=set(re.findall(r'id=["\']([^"\']+)["\']',s))
+          refs=set(re.findall(r'\$\(["\']([^"\']+)["\']\)',s))
+          missing=sorted(refs-ids)
+          print('ids',len(ids),'js refs',len(refs),'missing',missing)
+          if missing: raise SystemExit(1)
           PY
-          node --check /tmp/tricoach.js
+          node --check /tmp/tricoach4.js
 
       - name: Build install APK
         working-directory: buildsrc/tricoach_android
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
       - name: Collect APK
-        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v3.1-build32.apk
+        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v4.0-build40.apk
 
       - name: Upload install APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-v3.1-build32-APK
-          path: TriCoach-v3.1-build32.apk
+          name: TriCoach-v4.0-build40-APK
+          path: TriCoach-v4.0-build40.apk
           if-no-files-found: error
