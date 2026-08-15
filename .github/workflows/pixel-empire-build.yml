@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +32,16 @@ jobs:
       - name: Verify APK
         run: |
           test -s pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+          unzip -t pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk >/dev/null
           sha256sum pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Validate content counts
+        run: |
+          grep -q 'STAGE_COUNT = 24' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java
+          grep -q 'MAX_LEVEL = STAGE_COUNT \* LEVELS_PER_STAGE' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java
+          test "$(grep -c 'UpgradeDef(' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java)" -ge 19
+          test "$(grep -c 'ResearchDef(' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java)" -ge 17
+          test "$(grep -cE '^[0-9]+\.' pixel-empire-v1/FULL_GAME_CHECKLIST_150.md)" -eq 150
 
       - name: Enable KVM acceleration
         run: |
@@ -40,28 +49,33 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Emulator launch smoke test
+      - name: Android 15 interactive smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            adb logcat -c
-            adb install -r pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -W -n com.pixelempire.clicker/.MainActivity
-            sleep 8
-            adb logcat -d -v brief > pixel-empire-logcat.txt
-            adb shell pidof com.pixelempire.clicker
-            ! grep -qE "FATAL EXCEPTION|Process: com.pixelempire.clicker" pixel-empire-logcat.txt
+          script: bash pixel-empire-v1/ci/smoke.sh
 
-      - name: Upload logcat
+      - name: Android 9 compatibility smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 28
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: bash pixel-empire-v1/ci/compat.sh
+
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-logcat
-          path: pixel-empire-logcat.txt
+          name: Pixel-Empire-v2-diagnostics
+          path: |
+            pixel-empire-logcat.txt
+            pixel-empire-api28-logcat.txt
+            pixel-empire-v2-home.png
           if-no-files-found: ignore
           retention-days: 7
 
@@ -69,7 +83,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-Clicker-v1.0.1-APK
+          name: Pixel-Empire-Clicker-v2.0.0-APK
           path: pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
