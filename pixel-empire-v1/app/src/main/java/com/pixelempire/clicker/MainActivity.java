@@ -1,6 +1,7 @@
 package com.pixelempire.clicker;
 
 import android.app.Activity;
+import android.content.pm.ApplicationInfo;
 import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
@@ -17,9 +18,10 @@ public final class MainActivity extends Activity {
         state = new GameState();
         state.load(this);
 
-        // CI-only visual QA hook. It is ignored unless the debug build is launched
-        // explicitly with --ei demo_stage N, so normal players never see it.
-        if (BuildConfig.DEBUG) {
+        // CI-only visual QA hook. It is active only in a debuggable build and
+        // only when launched explicitly with --ei demo_stage N.
+        boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        if (debuggable) {
             int demoStage = getIntent().getIntExtra("demo_stage", -1);
             if (demoStage >= 0) {
                 demoStage = Math.max(0, Math.min(GameContent.STAGE_COUNT - 1, demoStage));
