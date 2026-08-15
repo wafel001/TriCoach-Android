@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,10 +34,40 @@ jobs:
           test -s pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
           sha256sum pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload APK
+      - name: Emulator launch smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb logcat -c
+            adb install -r pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n com.pixelempire.clicker/.MainActivity
+            sleep 6
+            adb shell pidof com.pixelempire.clicker
+            adb logcat -d -v brief > pixel-empire-logcat.txt
+            if grep -E "FATAL EXCEPTION|AndroidRuntime.*com.pixelempire.clicker|Process: com.pixelempire.clicker" pixel-empire-logcat.txt; then
+              echo "Pixel Empire crashed during smoke test"
+              grep -A 40 -B 10 -E "FATAL EXCEPTION|Process: com.pixelempire.clicker" pixel-empire-logcat.txt || true
+              exit 1
+            fi
+
+      - name: Upload logcat
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-Clicker-v1.0.0-APK
+          name: Pixel-Empire-logcat
+          path: pixel-empire-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pixel-Empire-Clicker-v1.0.1-APK
           path: pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
