@@ -44,8 +44,6 @@ jobs:
           mkdir buildsrc
           unzip -q tricoach-v4-build40.zip -d buildsrc
           test -f buildsrc/tricoach_android/settings.gradle
-          grep -q 'versionCode 40' buildsrc/tricoach_android/app/build.gradle
-          grep -q 'versionName "4.0"' buildsrc/tricoach_android/app/build.gradle
 
       - name: Validate web app
         run: |
@@ -62,6 +60,11 @@ jobs:
           if missing: raise SystemExit(1)
           PY
           node --check /tmp/tricoach4.js
+
+      - name: Verify Android version
+        run: |
+          grep -q "versionCode 40" buildsrc/tricoach_android/app/build.gradle
+          grep -q "versionName '4.0'" buildsrc/tricoach_android/app/build.gradle
 
       - name: Build install APK
         working-directory: buildsrc/tricoach_android
