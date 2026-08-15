@@ -1,8 +1,6 @@
-name: Build TriCoach 4.0 APK
+name: Build TriCoach 4.0.1 APK
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -35,47 +33,50 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Rebuild TriCoach 4.0 build 40 project
+      - name: Rebuild TriCoach 4.0 base
         run: |
           cat payload/v40build40.part* | base64 --decode > tricoach-v4-build40.zip
           echo "6e2afc70609eefbf8d5ccdb755bab26770bb9d6abc99b39dfffdd749f92fea83  tricoach-v4-build40.zip" | sha256sum -c -
-          unzip -t tricoach-v4-build40.zip
           rm -rf buildsrc
           mkdir buildsrc
           unzip -q tricoach-v4-build40.zip -d buildsrc
-          test -f buildsrc/tricoach_android/settings.gradle
 
-      - name: Validate web app
+      - name: Patch to TriCoach 4.0.1 build 41
+        run: |
+          base64 --decode payload/tc401.patch.gz.b64 | gzip -dc > /tmp/tc401.patch
+          cd buildsrc
+          patch -p1 < /tmp/tc401.patch
+
+      - name: Validate web app and version
         run: |
           python3 - <<'PY'
           import re, pathlib
           p=pathlib.Path('buildsrc/tricoach_android/app/src/main/assets/index.html')
           s=p.read_text()
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
-          pathlib.Path('/tmp/tricoach4.js').write_text('\n'.join(scripts))
+          pathlib.Path('/tmp/tricoach401.js').write_text('\n'.join(scripts))
           ids=set(re.findall(r'id=["\']([^"\']+)["\']',s))
           refs=set(re.findall(r'\$\(["\']([^"\']+)["\']\)',s))
           missing=sorted(refs-ids)
-          print('ids',len(ids),'js refs',len(refs),'missing',missing)
+          print('missing ids',missing)
           if missing: raise SystemExit(1)
           PY
-          node --check /tmp/tricoach4.js
-
-      - name: Verify Android version
-        run: |
-          grep -q "versionCode 40" buildsrc/tricoach_android/app/build.gradle
-          grep -q "versionName '4.0'" buildsrc/tricoach_android/app/build.gradle
+          node --check /tmp/tricoach401.js
+          grep -q "versionCode 41" buildsrc/tricoach_android/app/build.gradle
+          grep -q "versionName '4.0.1'" buildsrc/tricoach_android/app/build.gradle
+          grep -q "tricoach-polar-oauth.vercel.app" buildsrc/tricoach_android/app/src/main/assets/index.html
+          grep -q 'android:scheme="tricoach"' buildsrc/tricoach_android/app/src/main/AndroidManifest.xml
 
       - name: Build install APK
         working-directory: buildsrc/tricoach_android
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
       - name: Collect APK
-        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v4.0-build40.apk
+        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v4.0.1-build41.apk
 
       - name: Upload install APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-v4.0-build40-APK
-          path: TriCoach-v4.0-build40.apk
+          name: TriCoach-v4.0.1-build41-APK
+          path: TriCoach-v4.0.1-build41.apk
           if-no-files-found: error
