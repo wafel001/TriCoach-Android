@@ -1,0 +1,11 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:navigationBarColor">#070B16</item>
+        <item name="android:statusBarColor">#070B16</item>
+        <item name="android:colorAccent">#FBBF24</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

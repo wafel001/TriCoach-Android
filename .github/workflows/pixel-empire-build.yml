@@ -1,0 +1,43 @@
+name: Pixel Empire Android Build
+
+on:
+  push:
+    branches:
+      - agent/pixel-empire-v1-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+        working-directory: pixel-empire-v1
+
+      - name: Verify APK
+        run: |
+          test -s pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pixel-Empire-Clicker-v1.0.0-APK
+          path: pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
