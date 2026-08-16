@@ -41,6 +41,56 @@ jobs:
           grep -q "2022.3.62f2" ci-work/GRA-Unity-v0.4.0/ProjectSettings/ProjectVersion.txt
           unzip -t /tmp/gra-unity.zip >/dev/null
 
+      - name: Apply runtime fix 02 to reconstructed source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('ci-work/GRA-Unity-v0.4.0')
+
+          def replace(path, old, new):
+              p = root / path
+              text = p.read_text(encoding='utf-8')
+              if old in text:
+                  text = text.replace(old, new)
+                  p.write_text(text, encoding='utf-8')
+              elif new not in text:
+                  raise SystemExit(f'Expected source pattern missing in {p}: {old!r}')
+
+          replace('Assets/Scripts/UI/LegacyHudController.cs',
+                  'Resources.GetBuiltinResource<Font>("Arial.ttf")',
+                  'Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")')
+
+          replace('Assets/Scripts/World/VoxelWorldPresenter.cs',
+                  'var shader=Shader.Find("Universal Render Pipeline/Lit");\n            if(shader==null)shader=Shader.Find("Standard");',
+                  'var shader=Shader.Find("Standard");\n            if(shader==null)shader=Shader.Find("Unlit/Color");\n            if(shader==null) throw new System.InvalidOperationException("No compatible runtime shader found.");')
+
+          replace('Assets/Editor/ProjectBootstrap.cs',
+                  'PlayerSettings.bundleVersion = "0.4.0";',
+                  'PlayerSettings.bundleVersion = "0.4.2";')
+          replace('Assets/Editor/ProjectBootstrap.cs',
+                  'PlayerSettings.Android.bundleVersionCode = 40;',
+                  'PlayerSettings.Android.bundleVersionCode = 42;')
+          replace('Assets/Editor/ProjectBootstrap.cs',
+                  'PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;',
+                  'PlayerSettings.Android.targetSdkVersion = (AndroidSdkVersions)35;')
+          replace('Assets/Editor/ProjectBootstrap.cs',
+                  'locationPathName = "Builds/Android/GRA-Legacy-Parity-v0.4.0.apk",',
+                  'locationPathName = "Builds/Android/Pixel-Empire-v0.4.2.apk",')
+          replace('Assets/Editor/ProjectBootstrap.cs',
+                  'options = BuildOptions.Development',
+                  'options = BuildOptions.None')
+          PY
+
+          grep -q 'LegacyRuntime.ttf' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/UI/LegacyHudController.cs
+          ! grep -q 'Arial.ttf' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/UI/LegacyHudController.cs
+          grep -q 'Shader.Find("Standard")' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/World/VoxelWorldPresenter.cs
+          ! grep -q 'Universal Render Pipeline/Lit' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/World/VoxelWorldPresenter.cs
+          grep -q 'targetSdkVersion = (AndroidSdkVersions)35' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
+          grep -q 'BuildOptions.None' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
+          grep -q 'bundleVersion = "0.4.2"' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
+          echo 'Runtime fix 02 source assertions: PASS'
+
       - name: Static QA
         working-directory: ci-work/GRA-Unity-v0.4.0
         run: python3 Tools/static_qa.py
@@ -49,9 +99,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ci-work/GRA-Unity-v0.4.0/Library
-          key: Library-GRA-2022.3.62f2-Android-${{ hashFiles('gra-ci/project90.part*') }}
+          key: Library-GRA-2022.3.62f2-Android-runtimefix02-${{ hashFiles('gra-ci/project90.part*') }}
           restore-keys: |
-            Library-GRA-2022.3.62f2-Android-
+            Library-GRA-2022.3.62f2-Android-runtimefix02-
 
       - name: Build Android APK in Unity
         uses: game-ci/unity-builder@v4
@@ -73,22 +123,22 @@ jobs:
           find ci-work/GRA-Unity-v0.4.0 -type f -name '*.apk' -print
           APK="$(find ci-work/GRA-Unity-v0.4.0 -type f -name '*.apk' -print | head -n 1)"
           test -n "$APK"
-          cp "$APK" Pixel-Empire-v0.4.1.apk
-          ls -lh Pixel-Empire-v0.4.1.apk
-          sha256sum Pixel-Empire-v0.4.1.apk
+          cp "$APK" Pixel-Empire-v0.4.2.apk
+          ls -lh Pixel-Empire-v0.4.2.apk
+          sha256sum Pixel-Empire-v0.4.2.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-v0.4.1-APK
-          path: Pixel-Empire-v0.4.1.apk
+          name: Pixel-Empire-v0.4.2-APK
+          path: Pixel-Empire-v0.4.2.apk
           if-no-files-found: error
 
       - name: Upload diagnostic files on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: GRA-Unity-v0.4.1-build-diagnostics
+          name: GRA-Unity-v0.4.2-build-diagnostics
           path: |
             ci-work/GRA-Unity-v0.4.0/Logs
             ci-work/GRA-Unity-v0.4.0/*.log
