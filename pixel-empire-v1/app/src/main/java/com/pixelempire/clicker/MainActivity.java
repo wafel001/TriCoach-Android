@@ -10,7 +10,7 @@ import android.view.WindowInsetsController;
 
 public final class MainActivity extends Activity {
     private ReleaseGameState state;
-    private UltraGameView gameView;
+    private FinalGameView gameView;
 
     @Override protected void onCreate(Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -29,7 +29,7 @@ public final class MainActivity extends Activity {
                 state.crystals=999;state.researchPoints=999;state.tutorialSeen=true;
             }
         }
-        gameView=new UltraGameView(this,state);
+        gameView=new FinalGameView(this,state);
         setContentView(gameView);
         getWindow().getDecorView().post(this::immersive);
     }
