@@ -1,9 +1,9 @@
-name: Pixel Empire Android Build
+name: Pixel Empire 3 Android Build
 
 on:
   push:
     branches:
-      - agent/pixel-empire-v1-build
+      - agent/pixel-empire-v3
   workflow_dispatch:
 
 jobs:
@@ -35,13 +35,16 @@ jobs:
           unzip -t pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk >/dev/null
           sha256sum pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Validate content counts
+      - name: Validate v3 content and balance
         run: |
-          grep -q 'STAGE_COUNT = 24' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java
-          grep -q 'MAX_LEVEL = STAGE_COUNT \* LEVELS_PER_STAGE' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java
-          test "$(grep -c 'UpgradeDef(' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java)" -ge 19
-          test "$(grep -c 'ResearchDef(' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/GameContent.java)" -ge 17
-          test "$(grep -cE '^[0-9]+\.' pixel-empire-v1/FULL_GAME_CHECKLIST_150.md)" -eq 150
+          grep -q 'STAGE_COUNT = 40' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java
+          grep -q 'LEVELS_PER_STAGE = 25' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java
+          grep -q 'OFFLINE_EFFICIENCY=0.20' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3State.java
+          grep -q 'OFFLINE_CAP_MS=12L' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3State.java
+          grep -q 'Math.floor(comboClicks/50.0).*0.1' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3View.java
+          test "$(grep -c 'new BuildingDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java)" -ge 15
+          test "$(grep -c 'new HeroDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java)" -ge 12
+          test "$(grep -c 'new TechDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java)" -ge 20
 
       - name: Enable KVM acceleration
         run: |
@@ -56,7 +59,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: bash pixel-empire-v1/ci/smoke.sh
+          script: bash pixel-empire-v1/ci/v3-smoke.sh
 
       - name: Android 9 compatibility smoke test
         uses: reactivecircus/android-emulator-runner@v2
@@ -65,18 +68,19 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: bash pixel-empire-v1/ci/compat.sh
+          script: bash pixel-empire-v1/ci/v3-compat.sh
 
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-v2-diagnostics
+          name: Pixel-Empire-v3-diagnostics
           path: |
-            pixel-empire-logcat.txt
-            pixel-empire-api28-logcat.txt
-            pixel-empire-v2-home.png
-            pixel-empire-v2-infinity.png
+            pixel-empire-v3-logcat.txt
+            pixel-empire-v3-api28-logcat.txt
+            pixel-empire-v3-start.png
+            pixel-empire-v3-castle.png
+            pixel-empire-v3-infinity.png
           if-no-files-found: ignore
           retention-days: 7
 
@@ -84,7 +88,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-Clicker-v2.0.0-APK
+          name: Pixel-Empire-Clicker-v3.0.0-APK
           path: pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
