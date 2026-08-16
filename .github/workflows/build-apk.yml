@@ -41,55 +41,94 @@ jobs:
           grep -q "2022.3.62f2" ci-work/GRA-Unity-v0.4.0/ProjectSettings/ProjectVersion.txt
           unzip -t /tmp/gra-unity.zip >/dev/null
 
-      - name: Apply runtime fix 02 to reconstructed source
+      - name: Apply runtime fix 03 to reconstructed source
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           root = Path('ci-work/GRA-Unity-v0.4.0')
 
-          def replace(path, old, new):
-              p = root / path
-              text = p.read_text(encoding='utf-8')
-              if old in text:
-                  text = text.replace(old, new)
-                  p.write_text(text, encoding='utf-8')
-              elif new not in text:
-                  raise SystemExit(f'Expected source pattern missing in {p}: {old!r}')
+          # UI font: Arial.ttf is no longer a valid built-in runtime font in this Unity line.
+          hud = root / 'Assets/Scripts/UI/LegacyHudController.cs'
+          text = hud.read_text(encoding='utf-8')
+          text = text.replace('Resources.GetBuiltinResource<Font>("Arial.ttf")',
+                              'Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")')
+          hud.write_text(text, encoding='utf-8')
 
-          replace('Assets/Scripts/UI/LegacyHudController.cs',
-                  'Resources.GetBuiltinResource<Font>("Arial.ttf")',
-                  'Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")')
+          # Create a tiny shader in Resources so it cannot be stripped from the Android player build.
+          resources = root / 'Assets/Resources'
+          resources.mkdir(parents=True, exist_ok=True)
+          shader = resources / 'VoxelColor.shader'
+          shader.write_text(r'''Shader "GRA/VoxelColor"
+          {
+              Properties
+              {
+                  _Color ("Color", Color) = (1,1,1,1)
+                  [HideInInspector] _ZWrite ("ZWrite", Float) = 1
+              }
+              SubShader
+              {
+                  Tags { "RenderType"="Opaque" }
+                  Pass
+                  {
+                      Tags { "LightMode"="SRPDefaultUnlit" }
+                      Blend SrcAlpha OneMinusSrcAlpha
+                      ZWrite [_ZWrite]
+                      CGPROGRAM
+                      #pragma vertex vert
+                      #pragma fragment frag
+                      #include "UnityCG.cginc"
+                      struct appdata { float4 vertex : POSITION; };
+                      struct v2f { float4 pos : SV_POSITION; };
+                      fixed4 _Color;
+                      v2f vert(appdata v) { v2f o; o.pos = UnityObjectToClipPos(v.vertex); return o; }
+                      fixed4 frag(v2f i) : SV_Target { return _Color; }
+                      ENDCG
+                  }
+              }
+              Fallback Off
+          }
+          ''', encoding='utf-8')
 
-          replace('Assets/Scripts/World/VoxelWorldPresenter.cs',
-                  'var shader=Shader.Find("Universal Render Pipeline/Lit");\n            if(shader==null)shader=Shader.Find("Standard");',
-                  'var shader=Shader.Find("Standard");\n            if(shader==null)shader=Shader.Find("Unlit/Color");\n            if(shader==null) throw new System.InvalidOperationException("No compatible runtime shader found.");')
+          world = root / 'Assets/Scripts/World/VoxelWorldPresenter.cs'
+          text = world.read_text(encoding='utf-8')
+          start = text.find('            var shader=Shader.Find(')
+          marker = '            var mat=new Material(shader)'
+          end = text.find(marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('Could not locate runtime shader construction block')
+          replacement = (
+              '            var shader=Shader.Find("GRA/VoxelColor");\n'
+              '            if(shader==null) throw new System.InvalidOperationException("GRA/VoxelColor shader missing from player build.");\n'
+          )
+          text = text[:start] + replacement + text[end:]
+          world.write_text(text, encoding='utf-8')
 
-          replace('Assets/Editor/ProjectBootstrap.cs',
-                  'PlayerSettings.bundleVersion = "0.4.0";',
-                  'PlayerSettings.bundleVersion = "0.4.2";')
-          replace('Assets/Editor/ProjectBootstrap.cs',
-                  'PlayerSettings.Android.bundleVersionCode = 40;',
-                  'PlayerSettings.Android.bundleVersionCode = 42;')
-          replace('Assets/Editor/ProjectBootstrap.cs',
-                  'PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;',
-                  'PlayerSettings.Android.targetSdkVersion = (AndroidSdkVersions)35;')
-          replace('Assets/Editor/ProjectBootstrap.cs',
-                  'locationPathName = "Builds/Android/GRA-Legacy-Parity-v0.4.0.apk",',
-                  'locationPathName = "Builds/Android/Pixel-Empire-v0.4.2.apk",')
-          replace('Assets/Editor/ProjectBootstrap.cs',
-                  'options = BuildOptions.Development',
-                  'options = BuildOptions.None')
+          boot = root / 'Assets/Editor/ProjectBootstrap.cs'
+          text = boot.read_text(encoding='utf-8')
+          text = re.sub(r'PlayerSettings\.bundleVersion\s*=\s*"[^"]+";',
+                        'PlayerSettings.bundleVersion = "0.4.3";', text)
+          text = re.sub(r'PlayerSettings\.Android\.bundleVersionCode\s*=\s*\d+;',
+                        'PlayerSettings.Android.bundleVersionCode = 43;', text)
+          text = re.sub(r'PlayerSettings\.Android\.targetSdkVersion\s*=\s*[^;]+;',
+                        'PlayerSettings.Android.targetSdkVersion = (AndroidSdkVersions)35;', text)
+          text = re.sub(r'locationPathName\s*=\s*"[^"]+\.apk",',
+                        'locationPathName = "Builds/Android/Pixel-Empire-v0.4.3.apk",', text)
+          text = re.sub(r'options\s*=\s*BuildOptions\.[A-Za-z]+',
+                        'options = BuildOptions.None', text)
+          boot.write_text(text, encoding='utf-8')
           PY
 
+          test -f ci-work/GRA-Unity-v0.4.0/Assets/Resources/VoxelColor.shader
           grep -q 'LegacyRuntime.ttf' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/UI/LegacyHudController.cs
           ! grep -q 'Arial.ttf' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/UI/LegacyHudController.cs
-          grep -q 'Shader.Find("Standard")' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/World/VoxelWorldPresenter.cs
-          ! grep -q 'Universal Render Pipeline/Lit' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/World/VoxelWorldPresenter.cs
+          grep -q 'Shader.Find("GRA/VoxelColor")' ci-work/GRA-Unity-v0.4.0/Assets/Scripts/World/VoxelWorldPresenter.cs
+          grep -q 'Shader "GRA/VoxelColor"' ci-work/GRA-Unity-v0.4.0/Assets/Resources/VoxelColor.shader
           grep -q 'targetSdkVersion = (AndroidSdkVersions)35' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
           grep -q 'BuildOptions.None' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
-          grep -q 'bundleVersion = "0.4.2"' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
-          echo 'Runtime fix 02 source assertions: PASS'
+          grep -q 'bundleVersion = "0.4.3"' ci-work/GRA-Unity-v0.4.0/Assets/Editor/ProjectBootstrap.cs
+          echo 'Runtime fix 03 source assertions: PASS'
 
       - name: Static QA
         working-directory: ci-work/GRA-Unity-v0.4.0
@@ -99,9 +138,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ci-work/GRA-Unity-v0.4.0/Library
-          key: Library-GRA-2022.3.62f2-Android-runtimefix02-${{ hashFiles('gra-ci/project90.part*') }}
+          key: Library-GRA-2022.3.62f2-Android-runtimefix03-${{ hashFiles('gra-ci/project90.part*') }}
           restore-keys: |
-            Library-GRA-2022.3.62f2-Android-runtimefix02-
+            Library-GRA-2022.3.62f2-Android-runtimefix03-
 
       - name: Build Android APK in Unity
         uses: game-ci/unity-builder@v4
@@ -120,25 +159,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find ci-work/GRA-Unity-v0.4.0 -type f -name '*.apk' -print
           APK="$(find ci-work/GRA-Unity-v0.4.0 -type f -name '*.apk' -print | head -n 1)"
           test -n "$APK"
-          cp "$APK" Pixel-Empire-v0.4.2.apk
-          ls -lh Pixel-Empire-v0.4.2.apk
-          sha256sum Pixel-Empire-v0.4.2.apk
+          cp "$APK" Pixel-Empire-v0.4.3.apk
+          ls -lh Pixel-Empire-v0.4.3.apk
+          sha256sum Pixel-Empire-v0.4.3.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-v0.4.2-APK
-          path: Pixel-Empire-v0.4.2.apk
+          name: Pixel-Empire-v0.4.3-APK
+          path: Pixel-Empire-v0.4.3.apk
           if-no-files-found: error
 
       - name: Upload diagnostic files on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: GRA-Unity-v0.4.2-build-diagnostics
+          name: GRA-Unity-v0.4.3-build-diagnostics
           path: |
             ci-work/GRA-Unity-v0.4.0/Logs
             ci-work/GRA-Unity-v0.4.0/*.log
