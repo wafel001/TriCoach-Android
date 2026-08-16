@@ -10,11 +10,18 @@ FINAL_SHOT="pixel-empire-v2-infinity.png"
 
 adb logcat -c
 adb install -r "$APK"
+# Prevent Android's one-time immersive-mode education panel from stealing QA taps.
+adb shell settings put secure immersive_mode_confirmations confirmed 2>/dev/null || true
 adb shell am force-stop "$PKG" || true
 adb shell am start -W -n "$ACT"
 sleep 2
+# Fallback for emulator images that ignore the secure setting.
+adb shell input tap 900 500 || true
+sleep 0.7
+adb shell uiautomator dump /sdcard/pixel-window.xml >/dev/null 2>&1 || true
+adb shell cat /sdcard/pixel-window.xml 2>/dev/null | grep -q "Viewing full screen" && { echo "Immersive-mode overlay still visible"; exit 1; } || true
 
-# Dismiss the four tutorial pages.
+# Dismiss the four in-game tutorial pages.
 for i in 1 2 3 4; do adb shell input tap 540 1100; sleep 0.25; done
 
 # Tap across the entire world image, not only the central building.
@@ -32,6 +39,8 @@ adb shell input tap 324 2290; sleep 0.4   # upgrades
 adb shell input tap 540 2290; sleep 0.4   # missions
 adb shell input tap 756 2290; sleep 0.4   # research
 adb shell input tap 972 2290; sleep 0.4   # menu
+# Cycle all six languages and make sure settings remain responsive.
+for i in 1 2 3 4 5 6; do adb shell input tap 900 1050; sleep 0.18; done
 adb shell input tap 108 2290; sleep 0.5   # world
 
 adb exec-out screencap -p > "$SHOT"
@@ -60,6 +69,10 @@ adb exec-out screencap -p > "$FINAL_SHOT"
 PID="$(adb shell pidof "$PKG" | tr -d '\r' || true)"
 [[ -n "$PID" ]]
 
+# Confirm the system education overlay did not return for the final-stage QA shot.
+adb shell uiautomator dump /sdcard/pixel-window-final.xml >/dev/null 2>&1 || true
+adb shell cat /sdcard/pixel-window-final.xml 2>/dev/null | grep -q "Viewing full screen" && { echo "Immersive overlay visible in final QA"; exit 1; } || true
+
 adb logcat -d -v brief > "$LOG"
 if grep -qE "FATAL EXCEPTION|Process: $PKG" "$LOG"; then
   echo "Fatal Android exception detected"
@@ -67,4 +80,4 @@ if grep -qE "FATAL EXCEPTION|Process: $PKG" "$LOG"; then
   exit 1
 fi
 
-echo "Pixel Empire interactive + visual QA smoke test passed; PID=$PID"
+echo "Pixel Empire interactive + localization + visual QA smoke test passed; PID=$PID"
