@@ -66,25 +66,29 @@ jobs:
           androidExportType: androidPackage
           buildMethod: GRA.Editor.ProjectBootstrap.BuildAndroid
 
-      - name: Verify APK
+      - name: Locate and verify APK
+        shell: bash
         run: |
-          APK="ci-work/GRA-Unity-v0.4.0/Builds/Android/GRA-Legacy-Parity-v0.4.0.apk"
-          test -f "$APK"
-          ls -lh "$APK"
-          sha256sum "$APK"
+          set -euo pipefail
+          find ci-work/GRA-Unity-v0.4.0 -type f -name '*.apk' -print
+          APK="$(find ci-work/GRA-Unity-v0.4.0 -type f -name '*.apk' -print | head -n 1)"
+          test -n "$APK"
+          cp "$APK" Pixel-Empire-v0.4.1.apk
+          ls -lh Pixel-Empire-v0.4.1.apk
+          sha256sum Pixel-Empire-v0.4.1.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GRA-Unity-v0.4.0-APK
-          path: ci-work/GRA-Unity-v0.4.0/Builds/Android/GRA-Legacy-Parity-v0.4.0.apk
+          name: Pixel-Empire-v0.4.1-APK
+          path: Pixel-Empire-v0.4.1.apk
           if-no-files-found: error
 
       - name: Upload diagnostic files on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: GRA-Unity-v0.4.0-build-diagnostics
+          name: GRA-Unity-v0.4.1-build-diagnostics
           path: |
             ci-work/GRA-Unity-v0.4.0/Logs
             ci-work/GRA-Unity-v0.4.0/*.log
