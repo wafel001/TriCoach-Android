@@ -45,7 +45,7 @@ jobs:
           find Assets/Scripts/Gameplay -type f -name '*.cs' -print0 | sort -z | xargs -0 sha256sum > /tmp/gameplay-before.sha256
           cat /tmp/gameplay-before.sha256
 
-      - name: Apply v0.5.0 visual rebuild only
+      - name: Apply v0.5.1 URP visual rebuild only
         run: |
           set -euo pipefail
           python3 gra-ci/v050/apply_v050.py ci-work/GRA-Unity-v0.4.0
@@ -65,22 +65,24 @@ jobs:
           diff -u /tmp/gameplay-before.sha256 /tmp/gameplay-after.sha256
           echo 'GAMEPLAY SOURCE PRESERVATION: PASS'
           ! grep -R '\.material\.color' Assets/Scripts/World
-          ! grep -R 'Universal Render Pipeline/Lit\|SRPDefaultUnlit' Assets/Scripts Assets/Resources/Shaders
+          grep -q '"RenderPipeline"="UniversalPipeline"' Assets/Resources/Shaders/VoxelColor.shader
+          grep -q 'Lighting.hlsl' Assets/Resources/Shaders/VoxelColor.shader
           grep -q 'RuntimeFontProvider.Get()' Assets/Scripts/UI/LegacyHudController.cs
-          grep -q 'GraphicsSettings.defaultRenderPipeline=null' Assets/Editor/ProjectBootstrap.cs
+          grep -q 'UniversalRenderPipelineAsset' Assets/Editor/ProjectBootstrap.cs
+          grep -q 'com.unity.render-pipelines.universal' Packages/manifest.json
           grep -q 'AndroidApiLevelAuto' Assets/Editor/ProjectBootstrap.cs
           grep -q 'com.unity.modules.physics' Packages/manifest.json
           grep -q 'com.unity.modules.jsonserialize' Packages/manifest.json
           cp "$GITHUB_WORKSPACE/gra-ci/v050/gameplay_stress.py" Tools/ci_gameplay_stress.py
           python3 Tools/ci_gameplay_stress.py
 
-      - name: Cache Unity Library v0.5
+      - name: Cache Unity Library v0.5.1 URP
         uses: actions/cache@v4
         with:
           path: ci-work/GRA-Unity-v0.4.0/Library
-          key: Library-PixelEmpire-2022.3.62f2-Android-v050-${{ hashFiles('gra-ci/project90.part*', 'gra-ci/v050/**', '.github/workflows/build-apk.yml') }}
+          key: Library-PixelEmpire-2022.3.62f2-Android-v051-URP-${{ hashFiles('gra-ci/project90.part*', 'gra-ci/v050/**', '.github/workflows/build-apk.yml') }}
           restore-keys: |
-            Library-PixelEmpire-2022.3.62f2-Android-v050-
+            Library-PixelEmpire-2022.3.62f2-Android-v051-URP-
 
       - name: Build Android APK in Unity
         uses: game-ci/unity-builder@v4
@@ -99,31 +101,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APK="$(find ci-work/GRA-Unity-v0.4.0 -type f -name 'Pixel-Empire-v0.5.0.apk' -print | head -n 1)"
+          APK="$(find ci-work/GRA-Unity-v0.4.0 -type f -name 'Pixel-Empire-v0.5.1.apk' -print | head -n 1)"
           test -n "$APK"
-          cp "$APK" Pixel-Empire-v0.5.0.apk
-          ls -lh Pixel-Empire-v0.5.0.apk
-          sha256sum Pixel-Empire-v0.5.0.apk | tee apk-sha256.txt
+          cp "$APK" Pixel-Empire-v0.5.1.apk
+          ls -lh Pixel-Empire-v0.5.1.apk
+          sha256sum Pixel-Empire-v0.5.1.apk | tee apk-sha256.txt
           AAPT="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name aapt 2>/dev/null | sort -V | tail -n 1 || true)"
           if [ -z "$AAPT" ]; then
             echo '::error::aapt not found; cannot verify targetSdkVersion'
             exit 1
           fi
-          "$AAPT" dump badging Pixel-Empire-v0.5.0.apk | tee apk-badging.txt
+          "$AAPT" dump badging Pixel-Empire-v0.5.1.apk | tee apk-badging.txt
           TARGET="$(sed -n "s/.*targetSdkVersion:'\([0-9][0-9]*\)'.*/\1/p" apk-badging.txt | head -n 1)"
+          VERSION="$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" apk-badging.txt | head -n 1)"
           test -n "$TARGET" || { echo '::error::targetSdkVersion missing from APK'; exit 1; }
+          test "$VERSION" = '0.5.1' || { echo "::error::wrong APK version $VERSION"; exit 1; }
           echo "ACTUAL_TARGET_SDK=$TARGET"
           if [ "$TARGET" -lt 35 ]; then
-            echo "::error::APK targetSdkVersion $TARGET is too old for our Android compatibility gate"
+            echo "::error::APK targetSdkVersion $TARGET is too old for Android compatibility gate"
             exit 1
           fi
 
       - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-v0.5.0-APK
+          name: Pixel-Empire-v0.5.1-URP-APK
           path: |
-            Pixel-Empire-v0.5.0.apk
+            Pixel-Empire-v0.5.1.apk
             apk-badging.txt
             apk-sha256.txt
           if-no-files-found: error
@@ -132,7 +136,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-v0.5.0-diagnostics
+          name: Pixel-Empire-v0.5.1-URP-diagnostics
           path: |
             ci-work/GRA-Unity-v0.4.0/Logs
             ci-work/GRA-Unity-v0.4.0/*.log
