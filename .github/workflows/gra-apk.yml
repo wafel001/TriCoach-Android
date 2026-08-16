@@ -4,7 +4,7 @@ on:
   push:
     branches: [gra-apk-build]
     paths:
-      - 'payload/gra-apk-v0.3.zip.b64'
+      - 'payload/v03.part*'
       - 'payload/gra-game-v0.3.js'
       - '.github/workflows/gra-apk.yml'
   workflow_dispatch:
@@ -17,7 +17,9 @@ jobs:
 
       - name: Reconstruct Android project
         run: |
-          base64 -d payload/gra-apk-v0.3.zip.b64 > gra-apk-project.zip
+          cat payload/v03.part0 payload/v03.part1 payload/v03.part2 payload/v03.part3 payload/v03.part4 > gra-apk-project.b64
+          base64 -d gra-apk-project.b64 > gra-apk-project.zip
+          unzip -tq gra-apk-project.zip
           unzip -q gra-apk-project.zip
           cp payload/gra-game-v0.3.js gra-apk/app/src/main/assets/game.js
           test -f gra-apk/settings.gradle.kts
