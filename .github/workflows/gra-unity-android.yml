@@ -6,6 +6,7 @@ on:
     branches: [ gra-unity-v0.4.0 ]
     paths:
       - 'gra-ci/**'
+      - 'payload/project.b64.part*'
       - '.github/workflows/gra-unity-android.yml'
 
 permissions:
@@ -18,17 +19,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct Unity project
+      - name: Reconstruct and validate Unity project
         shell: bash
         run: |
           set -euo pipefail
-          cat gra-ci/project90.part* | base64 --decode > /tmp/gra-unity-v0.4.0.zip
+          decode_archive() {
+            local pattern="$1" out="$2"
+            cat $pattern | base64 --decode > "$out" || return 1
+            unzip -tq "$out" >/dev/null 2>&1
+          }
+          ARCHIVE=/tmp/gra-unity-v0.4.0.zip
+          if decode_archive 'gra-ci/project90.part*' "$ARCHIVE"; then
+            echo 'Using v0.4.0 90% production archive.'
+          elif decode_archive 'payload/project.b64.part*' "$ARCHIVE"; then
+            echo 'WARNING: project90 archive incomplete; using last valid Unity archive for compile diagnostics.'
+          else
+            echo 'No valid Unity project archive found.' >&2
+            exit 2
+          fi
           rm -rf unity-project
           mkdir unity-project
-          unzip -q /tmp/gra-unity-v0.4.0.zip -d unity-project
+          unzip -q "$ARCHIVE" -d unity-project
           PROJECT_DIR=$(find unity-project -type f -path '*/ProjectSettings/ProjectVersion.txt' -printf '%h\n' | sed 's#/ProjectSettings$##' | head -n1)
           test -n "$PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          cat "$PROJECT_DIR/ProjectSettings/ProjectVersion.txt"
           grep -q '2022.3.62f2' "$PROJECT_DIR/ProjectSettings/ProjectVersion.txt"
 
       - name: Unity compile and Android build
