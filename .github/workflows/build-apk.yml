@@ -49,6 +49,17 @@ jobs:
         run: |
           set -euo pipefail
           python3 gra-ci/v050/apply_v050.py ci-work/GRA-Unity-v0.4.0
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('ci-work/GRA-Unity-v0.4.0/Packages/manifest.json')
+          data=json.loads(p.read_text(encoding='utf-8'))
+          deps=data.setdefault('dependencies',{})
+          deps['com.unity.modules.jsonserialize']='1.0.0'
+          deps['com.unity.modules.physics']='1.0.0'
+          p.write_text(json.dumps(data,indent=2)+'\n',encoding='utf-8')
+          print('BUILT-IN MODULES: jsonserialize + physics enabled')
+          PY
           cd ci-work/GRA-Unity-v0.4.0
           find Assets/Scripts/Gameplay -type f -name '*.cs' -print0 | sort -z | xargs -0 sha256sum > /tmp/gameplay-after.sha256
           diff -u /tmp/gameplay-before.sha256 /tmp/gameplay-after.sha256
@@ -58,6 +69,8 @@ jobs:
           grep -q 'RuntimeFontProvider.Get()' Assets/Scripts/UI/LegacyHudController.cs
           grep -q 'GraphicsSettings.defaultRenderPipeline=null' Assets/Editor/ProjectBootstrap.cs
           grep -q 'AndroidApiLevelAuto' Assets/Editor/ProjectBootstrap.cs
+          grep -q 'com.unity.modules.physics' Packages/manifest.json
+          grep -q 'com.unity.modules.jsonserialize' Packages/manifest.json
           cp "$GITHUB_WORKSPACE/gra-ci/v050/gameplay_stress.py" Tools/ci_gameplay_stress.py
           python3 Tools/ci_gameplay_stress.py
 
@@ -65,7 +78,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ci-work/GRA-Unity-v0.4.0/Library
-          key: Library-PixelEmpire-2022.3.62f2-Android-v050-${{ hashFiles('gra-ci/project90.part*', 'gra-ci/v050/**') }}
+          key: Library-PixelEmpire-2022.3.62f2-Android-v050-${{ hashFiles('gra-ci/project90.part*', 'gra-ci/v050/**', '.github/workflows/build-apk.yml') }}
           restore-keys: |
             Library-PixelEmpire-2022.3.62f2-Android-v050-
 
