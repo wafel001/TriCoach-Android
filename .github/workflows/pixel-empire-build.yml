@@ -43,12 +43,15 @@ jobs:
 
       - name: Validate release content and balance
         run: |
+          grep -q "versionCode 410" pixel-empire-v1/app/build.gradle
+          grep -q "versionName '4.1.0'" pixel-empire-v1/app/build.gradle
           grep -q 'STAGES = 40' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java
           grep -q 'LEVELS_PER_STAGE = 25' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java
           grep -q 'OFFLINE_EFFICIENCY = 0.20' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameState.java
           grep -q 'OFFLINE_CAP_MS = 12L' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameState.java
           grep -q 'Math.max(0,taps)/50' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameState.java
-          grep -q 'ReleaseArt.world' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameView.java
+          grep -q 'FinalGameView' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/MainActivity.java
+          grep -q 'EraFocusView' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/FinalGameView.java
           test "$(grep -c 'new BuildingDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java)" -ge 15
           test "$(grep -c 'new HeroDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java)" -ge 12
           test "$(grep -c 'new TechDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java)" -ge 20
@@ -81,7 +84,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-release-diagnostics
+          name: Pixel-Empire-4.1.0-diagnostics
           path: |
             pixel-empire-release-logcat.txt
             pixel-empire-release-api28-logcat.txt
@@ -95,7 +98,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-4.0.0-Google-Play-Candidate
+          name: Pixel-Empire-4.1.0-Google-Play-Candidate
           path: |
             pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
             pixel-empire-v1/app/build/outputs/bundle/release/app-release.aab
