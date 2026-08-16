@@ -1,0 +1,76 @@
+name: Apply GRA Runtime Fix 01
+
+on:
+  push:
+    branches: [ gra-unity-v0.4.0 ]
+    paths:
+      - '.github/workflows/apply-gra-runtime-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-project-payload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout production branch
+        uses: actions/checkout@v4
+        with:
+          ref: gra-unity-v0.4.0
+          fetch-depth: 0
+
+      - name: Reconstruct and patch Unity project
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/gra-fix /tmp/gra-fix.zip
+          mkdir -p /tmp/gra-fix
+          cat gra-ci/project90.part* | base64 --decode > /tmp/gra-old.zip
+          unzip -q /tmp/gra-old.zip -d /tmp/gra-fix
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('/tmp/gra-fix/GRA-Unity-v0.4.0')
+
+          hud = root/'Assets/Scripts/UI/LegacyHudController.cs'
+          s = hud.read_text()
+          s = s.replace('Resources.GetBuiltinResource<Font>("Arial.ttf")', 'Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")')
+          hud.write_text(s)
+
+          world = root/'Assets/Scripts/World/VoxelWorldPresenter.cs'
+          s = world.read_text()
+          old = '''            var shader=Shader.Find("Universal Render Pipeline/Lit");\n            if(shader==null)shader=Shader.Find("Standard");\n            var mat=new Material(shader){color=color,name=$"Voxel_{c.r}_{c.g}_{c.b}_{c.a}_{(transparent?1:0)}"};'''
+          new = '''            // Built-in pipeline is active in this milestone. URP/Lit without a URP asset renders magenta on device.\n            var shader=Shader.Find("Standard");\n            if(shader==null)shader=Shader.Find("Unlit/Color");\n            if(shader==null)throw new System.InvalidOperationException("No compatible runtime shader found.");\n            var mat=new Material(shader){color=color,name=$"Voxel_{c.r}_{c.g}_{c.b}_{c.a}_{(transparent?1:0)}"};'''
+          if old not in s and 'Shader.Find("Standard")' not in s:
+              raise SystemExit('Expected material block not found')
+          s = s.replace(old, new)
+          world.write_text(s)
+
+          boot = root/'Assets/Editor/ProjectBootstrap.cs'
+          s = boot.read_text()
+          s = s.replace('PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;', 'PlayerSettings.Android.targetSdkVersion = (AndroidSdkVersions)35;')
+          s = s.replace('PlayerSettings.bundleVersion = "0.4.0";', 'PlayerSettings.bundleVersion = "0.4.1";')
+          s = s.replace('PlayerSettings.Android.bundleVersionCode = 40;', 'PlayerSettings.Android.bundleVersionCode = 41;')
+          s = s.replace('options = BuildOptions.Development', 'options = BuildOptions.None')
+          s = s.replace('GRA-Legacy-Parity-v0.4.0.apk', 'GRA-Legacy-Parity-v0.4.1.apk')
+          boot.write_text(s)
+
+          (root/'Docs/RUNTIME_FIX_01.md').write_text('''# Runtime Fix 01\n\nPhysical Android smoke test fixes:\n- LegacyRuntime.ttf replaces removed Arial.ttf built-in font.\n- Built-in Standard shader replaces URP/Lit while no URP pipeline asset is configured.\n- Android Target API explicitly set to 35.\n- Development build flag removed.\n- Build version raised to 0.4.1 / 41.\n''')
+          PY
+
+          (cd /tmp/gra-fix/GRA-Unity-v0.4.0 && python3 Tools/static_qa.py)
+          (cd /tmp/gra-fix && zip -qr /tmp/gra-fix.zip GRA-Unity-v0.4.0)
+          unzip -tq /tmp/gra-fix.zip
+          rm -f gra-ci/project90.part*
+          base64 -w0 /tmp/gra-fix.zip | split -b 12000 -d -a 2 - gra-ci/project90.part
+          echo "Runtime fix payload:" && sha256sum /tmp/gra-fix.zip
+
+      - name: Commit patched project payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "wafel001"
+          git config user.email "89450053+wafel001@users.noreply.github.com"
+          git add gra-ci/project90.part*
+          git commit -m "Fix Android runtime shaders UI font and target SDK"
+          git push origin HEAD:gra-unity-v0.4.0
