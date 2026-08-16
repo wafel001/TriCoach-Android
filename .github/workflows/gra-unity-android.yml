@@ -1,0 +1,54 @@
+name: GRA Unity v0.4.0 Android Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ gra-unity-v0.4.0 ]
+    paths:
+      - 'gra-ci/**'
+      - '.github/workflows/gra-unity-android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unity-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct Unity project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat gra-ci/project90.part* | base64 --decode > /tmp/gra-unity-v0.4.0.zip
+          rm -rf unity-project
+          mkdir unity-project
+          unzip -q /tmp/gra-unity-v0.4.0.zip -d unity-project
+          PROJECT_DIR=$(find unity-project -type f -path '*/ProjectSettings/ProjectVersion.txt' -printf '%h\n' | sed 's#/ProjectSettings$##' | head -n1)
+          test -n "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          grep -q '2022.3.62f2' "$PROJECT_DIR/ProjectSettings/ProjectVersion.txt"
+
+      - name: Unity compile and Android build
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: ${{ env.PROJECT_DIR }}
+          unityVersion: 2022.3.62f2
+          targetPlatform: Android
+          buildName: GRA-v0.4.0
+          buildsPath: build
+          allowDirtyBuild: true
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GRA-v0.4.0-Android
+          path: build/Android
+          if-no-files-found: error
+          retention-days: 14
