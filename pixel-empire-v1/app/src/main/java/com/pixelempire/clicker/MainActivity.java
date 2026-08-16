@@ -9,31 +9,31 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 
 public final class MainActivity extends Activity {
-    private GameState state;
-    private GameView gameView;
+    private V3State state;
+    private V3View gameView;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        state = new GameState();
+        state = new V3State();
         state.load(this);
 
-        // CI-only visual QA hook. It is active only in a debuggable build and
-        // only when launched explicitly with --ei demo_stage N.
         boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         if (debuggable) {
             int demoStage = getIntent().getIntExtra("demo_stage", -1);
             if (demoStage >= 0) {
-                demoStage = Math.max(0, Math.min(GameContent.STAGE_COUNT - 1, demoStage));
+                demoStage = Math.max(0, Math.min(V3Content.STAGE_COUNT - 1, demoStage));
                 state.stage = demoStage;
-                state.level = Math.min(GameContent.MAX_LEVEL, demoStage * GameContent.LEVELS_PER_STAGE + 1);
-                state.buildXp = GameContent.xpForLevel(Math.max(1, state.level)) * 0.64;
-                state.coins = Math.pow(10, Math.min(18, demoStage + 2));
+                state.level = Math.min(V3Content.MAX_LEVEL, demoStage * V3Content.LEVELS_PER_STAGE + 1);
+                state.buildXp = V3Content.xpForLevel(Math.max(1, state.level)) * 0.64;
+                state.coins = Math.pow(10, Math.min(28, demoStage / 2 + 3));
+                state.science = Math.max(state.science, 500);
+                state.crystals = Math.max(state.crystals, 250);
                 state.tutorialSeen = true;
             }
         }
 
-        gameView = new GameView(this, state);
+        gameView = new V3View(this, state);
         setContentView(gameView);
         getWindow().getDecorView().post(this::enterFullscreen);
     }
