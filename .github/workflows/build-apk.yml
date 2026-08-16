@@ -1,82 +1,91 @@
-name: Build TriCoach 4.0.1 APK
+name: GRA Unity Android APK
 
 on:
-  pull_request:
-    branches: [ main ]
+  push:
+    branches: [ gra-unity-v0.4.0 ]
+    paths:
+      - 'gra-ci/**'
+      - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  build-unity-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '17'
+          fetch-depth: 1
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Unity license secrets
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          test -n "$UNITY_LICENSE" || { echo "::error::Missing UNITY_LICENSE"; exit 1; }
+          test -n "$UNITY_EMAIL" || { echo "::error::Missing UNITY_EMAIL"; exit 1; }
+          test -n "$UNITY_PASSWORD" || { echo "::error::Missing UNITY_PASSWORD"; exit 1; }
 
-      - name: Install Android SDK
-        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+      - name: Reconstruct Unity project
+        run: |
+          rm -rf ci-work /tmp/gra-unity.zip
+          mkdir -p ci-work
+          cat gra-ci/project90.part* | base64 --decode > /tmp/gra-unity.zip
+          unzip -q /tmp/gra-unity.zip -d ci-work
+          test -f ci-work/GRA-Unity-v0.4.0/ProjectSettings/ProjectVersion.txt
+          grep -q "2022.3.62f2" ci-work/GRA-Unity-v0.4.0/ProjectSettings/ProjectVersion.txt
+          unzip -t /tmp/gra-unity.zip >/dev/null
 
-      - name: Set up Gradle 8.13
-        uses: gradle/actions/setup-gradle@v4
+      - name: Static QA
+        working-directory: ci-work/GRA-Unity-v0.4.0
+        run: python3 Tools/static_qa.py
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
         with:
-          gradle-version: '8.13'
+          path: ci-work/GRA-Unity-v0.4.0/Library
+          key: Library-GRA-2022.3.62f2-Android-${{ hashFiles('gra-ci/project90.part*') }}
+          restore-keys: |
+            Library-GRA-2022.3.62f2-Android-
 
-      - name: Rebuild TriCoach 4.0 base
+      - name: Build Android APK in Unity
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: ci-work/GRA-Unity-v0.4.0
+          unityVersion: 2022.3.62f2
+          targetPlatform: Android
+          androidExportType: androidPackage
+          buildMethod: GRA.Editor.ProjectBootstrap.BuildAndroid
+
+      - name: Verify APK
         run: |
-          cat payload/v40build40.part* | base64 --decode > tricoach-v4-build40.zip
-          echo "6e2afc70609eefbf8d5ccdb755bab26770bb9d6abc99b39dfffdd749f92fea83  tricoach-v4-build40.zip" | sha256sum -c -
-          rm -rf buildsrc
-          mkdir buildsrc
-          unzip -q tricoach-v4-build40.zip -d buildsrc
+          APK="ci-work/GRA-Unity-v0.4.0/Builds/Android/GRA-Legacy-Parity-v0.4.0.apk"
+          test -f "$APK"
+          ls -lh "$APK"
+          sha256sum "$APK"
 
-      - name: Patch to TriCoach 4.0.1 build 41
-        run: |
-          cat payload/tc401.patch.gz.b64.part0 payload/tc401.patch.gz.b64.part1 | base64 --decode | gzip -dc > /tmp/tc401.patch
-          cd buildsrc
-          patch -p3 < /tmp/tc401.patch
-
-      - name: Validate web app and version
-        run: |
-          python3 - <<'PY'
-          import re, pathlib
-          p=pathlib.Path('buildsrc/tricoach_android/app/src/main/assets/index.html')
-          s=p.read_text()
-          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
-          pathlib.Path('/tmp/tricoach401.js').write_text('\n'.join(scripts))
-          ids=set(re.findall(r'id=["\']([^"\']+)["\']',s))
-          refs=set(re.findall(r'\$\(["\']([^"\']+)["\']\)',s))
-          missing=sorted(refs-ids)
-          print('missing ids',missing)
-          if missing: raise SystemExit(1)
-          PY
-          node --check /tmp/tricoach401.js
-          grep -q "versionCode 41" buildsrc/tricoach_android/app/build.gradle
-          grep -q "versionName '4.0.1'" buildsrc/tricoach_android/app/build.gradle
-          grep -q "tricoach-polar-oauth.vercel.app" buildsrc/tricoach_android/app/src/main/assets/index.html
-          grep -q 'android:scheme="tricoach"' buildsrc/tricoach_android/app/src/main/AndroidManifest.xml
-
-      - name: Build install APK
-        working-directory: buildsrc/tricoach_android
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
-
-      - name: Collect APK
-        run: cp buildsrc/tricoach_android/app/build/outputs/apk/debug/app-debug.apk TriCoach-v4.0.1-build41.apk
-
-      - name: Upload install APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TriCoach-v4.0.1-build41-APK
-          path: TriCoach-v4.0.1-build41.apk
+          name: GRA-Unity-v0.4.0-APK
+          path: ci-work/GRA-Unity-v0.4.0/Builds/Android/GRA-Legacy-Parity-v0.4.0.apk
           if-no-files-found: error
+
+      - name: Upload diagnostic files on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GRA-Unity-v0.4.0-build-diagnostics
+          path: |
+            ci-work/GRA-Unity-v0.4.0/Logs
+            ci-work/GRA-Unity-v0.4.0/*.log
+          if-no-files-found: ignore
