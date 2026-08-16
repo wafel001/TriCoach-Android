@@ -1,15 +1,15 @@
-name: Pixel Empire 3 Android Build
+name: Pixel Empire Google Play Candidate
 
 on:
   push:
     branches:
-      - agent/pixel-empire-v3
+      - agent/pixel-empire-release
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,31 +20,38 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Install Android API 36
+        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" >/dev/null
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Build debug APK and release AAB
+        run: gradle :app:assembleDebug :app:bundleRelease --stacktrace
         working-directory: pixel-empire-v1
 
-      - name: Verify APK
+      - name: Verify artifacts
         run: |
           test -s pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+          test -s pixel-empire-v1/app/build/outputs/bundle/release/app-release.aab
           unzip -t pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk >/dev/null
+          unzip -t pixel-empire-v1/app/build/outputs/bundle/release/app-release.aab >/dev/null
           sha256sum pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum pixel-empire-v1/app/build/outputs/bundle/release/app-release.aab
 
-      - name: Validate v3 content and balance
+      - name: Validate release content and balance
         run: |
-          grep -q 'STAGE_COUNT = 40' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java
-          grep -q 'LEVELS_PER_STAGE = 25' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java
-          grep -q 'OFFLINE_EFFICIENCY=0.20' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3State.java
-          grep -q 'OFFLINE_CAP_MS=12L' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3State.java
-          grep -q 'Math.floor(comboClicks/50.0).*0.1' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3View.java
-          test "$(grep -c 'new BuildingDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java)" -ge 15
-          test "$(grep -c 'new HeroDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java)" -ge 12
-          test "$(grep -c 'new TechDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/V3Content.java)" -ge 20
+          grep -q 'STAGES = 40' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java
+          grep -q 'LEVELS_PER_STAGE = 25' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java
+          grep -q 'OFFLINE_EFFICIENCY = 0.20' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameState.java
+          grep -q 'OFFLINE_CAP_MS = 12L' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameState.java
+          grep -q 'Math.max(0,taps)/50' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameState.java
+          grep -q 'ReleaseArt.world' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseGameView.java
+          test "$(grep -c 'new BuildingDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java)" -ge 15
+          test "$(grep -c 'new HeroDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java)" -ge 12
+          test "$(grep -c 'new TechDef' pixel-empire-v1/app/src/main/java/com/pixelempire/clicker/ReleaseContent.java)" -ge 20
 
       - name: Enable KVM acceleration
         run: |
@@ -52,43 +59,45 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Android 15 interactive smoke test
+      - name: Android 15 interactive release QA
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: bash pixel-empire-v1/ci/v3-smoke.sh
+          script: bash pixel-empire-v1/ci/release-smoke.sh
 
-      - name: Android 9 compatibility smoke test
+      - name: Android 9 compatibility QA
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 28
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: bash pixel-empire-v1/ci/v3-compat.sh
+          script: bash pixel-empire-v1/ci/release-compat.sh
 
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-v3-diagnostics
+          name: Pixel-Empire-release-diagnostics
           path: |
-            pixel-empire-v3-logcat.txt
-            pixel-empire-v3-api28-logcat.txt
-            pixel-empire-v3-start.png
-            pixel-empire-v3-castle.png
-            pixel-empire-v3-infinity.png
+            pixel-empire-release-logcat.txt
+            pixel-empire-release-api28-logcat.txt
+            pixel-empire-release-start.png
+            pixel-empire-release-castle.png
+            pixel-empire-release-infinity.png
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload APK
+      - name: Upload APK and AAB
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Pixel-Empire-Clicker-v3.0.0-APK
-          path: pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+          name: Pixel-Empire-4.0.0-Google-Play-Candidate
+          path: |
+            pixel-empire-v1/app/build/outputs/apk/debug/app-debug.apk
+            pixel-empire-v1/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 7
