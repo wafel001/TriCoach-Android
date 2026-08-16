@@ -58,7 +58,7 @@ jobs:
           grep -q 'RuntimeFontProvider.Get()' Assets/Scripts/UI/LegacyHudController.cs
           grep -q 'GraphicsSettings.defaultRenderPipeline=null' Assets/Editor/ProjectBootstrap.cs
           grep -q 'AndroidApiLevelAuto' Assets/Editor/ProjectBootstrap.cs
-          cp ../../../gra-ci/v050/gameplay_stress.py Tools/ci_gameplay_stress.py
+          cp "$GITHUB_WORKSPACE/gra-ci/v050/gameplay_stress.py" Tools/ci_gameplay_stress.py
           python3 Tools/ci_gameplay_stress.py
 
       - name: Cache Unity Library v0.5
