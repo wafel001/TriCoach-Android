@@ -55,8 +55,7 @@ namespace GRA.World
             if (transparent) key ^= unchecked((int)0x80000000);
             if (Cache.TryGetValue(key, out var cached) && cached != null) return cached;
 
-            // Clone a serialized Resources material. This creates a hard shader dependency in the APK
-            // and avoids runtime Shader.Find / shader stripping failures on Android.
+            // Clone the serialized Resources material so the APK contains a hard shader dependency.
             var m = new Material(BaseMaterial)
             {
                 name = $"GRA_Voxel_{c.r}_{c.g}_{c.b}_{c.a}_{(transparent ? 1 : 0)}",
@@ -88,8 +87,6 @@ namespace GRA.World
 
 bootstrap_rel = 'Assets/Editor/ProjectBootstrap.cs'
 s = read(bootstrap_rel)
-
-# Version and Android target: never rely on Auto for a compatibility gate.
 s = s.replace('Pixel-Empire-v0.5.1.apk', 'Pixel-Empire-v0.5.2.apk')
 s = s.replace('PlayerSettings.bundleVersion = "0.5.1"; PlayerSettings.Android.bundleVersionCode = 51;',
               'PlayerSettings.bundleVersion = "0.5.2"; PlayerSettings.Android.bundleVersionCode = 52;')
@@ -98,8 +95,6 @@ s = s.replace('PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.Andr
 s = s.replace('GRA_BUILD_VERSION=0.5.1', 'GRA_BUILD_VERSION=0.5.2')
 s = s.replace('GRA_TARGET_SDK_SETTING=Auto', 'GRA_TARGET_SDK_SETTING=35')
 
-# Generate a serialized Material asset in Resources before validation/build. A Material asset is a
-# hard reference to the shader and is substantially safer on Android than only loading a Shader by name.
 needle = '''        public static void ValidateProject()\n        {\n'''
 insert = r'''        const string MaterialPath = "Assets/Resources/Materials/VoxelColor.mat";
 
@@ -137,7 +132,6 @@ if needle not in s:
     raise SystemExit('ValidateProject injection point not found')
 s = s.replace(needle, insert, 1)
 
-# Validate the serialized material and its shader reference in the Editor before BuildPipeline runs.
 needle2 = '''            var shader = AssetDatabase.LoadAssetAtPath<Shader>(ShaderPath);\n            if (shader == null) throw new Exception("Voxel shader import failed");\n            if (ShaderUtil.ShaderHasError(shader)) throw new Exception("Voxel shader compile error: " + string.Join(" | ", ShaderUtil.GetShaderMessages(shader).Select(m => m.message)));\n'''
 replacement2 = needle2 + '''            var material = AssetDatabase.LoadAssetAtPath<Material>(MaterialPath);\n            if (material == null) throw new Exception("Serialized voxel material missing");\n            if (material.shader != shader) throw new Exception("Serialized voxel material does not reference GRA/VoxelColor");\n'''
 if needle2 not in s:
@@ -145,8 +139,7 @@ if needle2 not in s:
 s = s.replace(needle2, replacement2, 1)
 write(bootstrap_rel, s)
 
-# Static invariants for this patch itself.
-assert 'Shader.Find' not in read('Assets/Scripts/World/VisualMaterialLibrary.cs')
+assert 'Shader.Find(' not in read('Assets/Scripts/World/VisualMaterialLibrary.cs')
 assert 'Resources.Load<Material>(BaseMaterialResourcePath)' in read('Assets/Scripts/World/VisualMaterialLibrary.cs')
 assert 'Pixel-Empire-v0.5.2.apk' in read(bootstrap_rel)
 assert 'bundleVersion = "0.5.2"' in read(bootstrap_rel)
